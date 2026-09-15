@@ -66,6 +66,7 @@ func TestAC5_WorkerWithLLMCreatesMemories(t *testing.T) {
 	s, w := setup(t)
 	w.Append(wal.Entry{SessionID: "s1", Role: "user", Content: "I prefer window seats on every flight I take"})
 	w.Append(wal.Entry{SessionID: "s1", Role: "user", Content: "Remember that my daughter Ada is six years old"})
+	w.Close() // flush pending appends before draining (Append is async)
 
 	var gotPrompt string
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -120,6 +121,7 @@ func TestAC5_WorkerWithLLMCreatesMemories(t *testing.T) {
 func TestAC5_WorkerRetriesAfterLLMFailure(t *testing.T) {
 	s, w := setup(t)
 	w.Append(wal.Entry{SessionID: "s1", Role: "user", Content: "I prefer aisle seats on night flights"})
+	w.Close() // flush pending appends before draining (Append is async)
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "boom", http.StatusInternalServerError)
 	}))
