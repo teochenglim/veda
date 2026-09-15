@@ -32,13 +32,14 @@ One local memory file. Every MCP agent reads and writes it.
 
 Details: [RELEASE/v0.2.0.md](RELEASE/v0.2.0.md) · design in [DESIGN/10](DESIGN/10_design_semantic_recall.md)
 
-## v0.3.0 — Cross-agent conflict resolution 📋
+## v0.3.0 — Cross-agent conflict resolution ✅
 
-- [ ] Contradiction detection on write (supersede, don't duplicate)
-- [ ] Recall returns the current side of a conflict by default
-- [ ] UI conflicts view: keep-both / prefer-new / prefer-old
+- [x] Contradiction detection on write (supersede, don't duplicate) — heuristic slot + negation rules, no LLM call
+- [x] Recall returns the current side of a conflict by default (all recall paths)
+- [x] UI Conflicts tab: prefer-new / prefer-old / keep-both, all audited
+- [x] In-place v0.2 → v0.3 migration (status/superseded_by columns + conflicts table)
 
-Details: [RELEASE/v0.3.0.md](RELEASE/v0.3.0.md)
+Details: [RELEASE/v0.3.0.md](RELEASE/v0.3.0.md) · design in [DESIGN/11](DESIGN/11_design_conflict_resolution.md)
 
 ## v0.4.0 — Hosted sync (first paid tier) 💰
 

@@ -142,3 +142,39 @@ func TestRecallAudited(t *testing.T) {
 }
 
 func jsonMarshalOut(v any) ([]byte, error) { return json.Marshal(v) }
+
+// AC1/AC4 (v0.3): remember auto-supersedes a contradicting memory; list
+// hides superseded by default and reveals them with include_superseded.
+func TestAC4_ListIncludeSuperseded(t *testing.T) {
+	cs, s := session(t)
+	call(t, cs, "remember", map[string]any{"content": "User lives in Singapore with their family"})
+	call(t, cs, "remember", map[string]any{"content": "User moved to Tokyo last month for work"})
+
+	// default list: only the winning memory
+	lst := call(t, cs, "list", map[string]any{})
+	defaultMems, _ := lst["memories"].([]any)
+	if len(defaultMems) != 1 {
+		t.Fatalf("default list must hide superseded, got %d", len(defaultMems))
+	}
+	// include_superseded: both sides of the conflict
+	lst = call(t, cs, "list", map[string]any{"include_superseded": true})
+	all, _ := lst["memories"].([]any)
+	if len(all) != 2 {
+		t.Fatalf("include_superseded must return both, got %d", len(all))
+	}
+	// the superseded one carries the marker
+	for _, m := range all {
+		mm := m.(map[string]any)
+		if mm["status"] == "superseded" {
+			if mm["superseded_by"] == "" {
+				t.Fatal("superseded memory must name its replacement")
+			}
+		}
+	}
+	// recall never returns both sides (AC2 at the MCP boundary)
+	rec := call(t, cs, "recall", map[string]any{"query": "lives works moved", "limit": 10})
+	if m, _ := rec["memories"].([]any); len(m) > 1 {
+		t.Fatalf("recall must not return both sides of a conflict, got %d", len(m))
+	}
+	_ = s
+}

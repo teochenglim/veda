@@ -136,3 +136,57 @@ func TestAC7_ReviewUITabsAndActions(t *testing.T) {
 		t.Fatal("reject must discard the candidate")
 	}
 }
+
+// AC3 (v0.3): the Conflicts tab lists detected supersession pairs and the
+// keep-both / prefer-old / prefer-new resolutions are honored and audited.
+func TestAC3_ConflictsTabAndResolutions(t *testing.T) {
+	ts, s := uiTest(t)
+
+	// a contradicting write creates a conflict automatically
+	s.Remember(&store.Memory{Content: "User lives in Singapore with their family"}, "cursor")
+	s.Remember(&store.Memory{Content: "User moved to Tokyo last month for work"}, "claude")
+
+	var conflicts []*store.Conflict
+	get(t, ts.URL+"/api/conflicts", &conflicts)
+	if len(conflicts) != 1 {
+		t.Fatalf("expected 1 conflict pair, got %d", len(conflicts))
+	}
+	if conflicts[0].Resolution != "new" {
+		t.Fatalf("auto-resolution must default to new, got %q", conflicts[0].Resolution)
+	}
+
+	// keep both: both memories become active again
+	post(t, ts.URL+"/api/conflicts/resolve", map[string]any{"id": conflicts[0].ID, "resolution": "both"}, 200)
+	var mems []*store.Memory
+	get(t, ts.URL+"/api/memories", &mems)
+	if len(mems) != 2 {
+		t.Fatalf("keep-both must reinstate the old memory, %d active", len(mems))
+	}
+	get(t, ts.URL+"/api/conflicts", &conflicts)
+	if conflicts[0].Resolution != "both" {
+		t.Fatalf("resolution not recorded: %q", conflicts[0].Resolution)
+	}
+
+	// prefer-old: the new memory is superseded instead
+	post(t, ts.URL+"/api/conflicts/resolve", map[string]any{"id": conflicts[0].ID, "resolution": "old"}, 200)
+	get(t, ts.URL+"/api/memories", &mems)
+	if len(mems) != 1 || !strings.Contains(mems[0].Content, "Singapore") {
+		t.Fatalf("prefer-old must reinstate Singapore, got %+v", mems)
+	}
+
+	// invalid resolution is a 400
+	post(t, ts.URL+"/api/conflicts/resolve", map[string]any{"id": conflicts[0].ID, "resolution": "nuke"}, 400)
+
+	// resolution audited
+	var audit []*store.AuditEntry
+	get(t, ts.URL+"/api/audit", &audit)
+	resolves := 0
+	for _, a := range audit {
+		if a.Action == "resolve" {
+			resolves++
+		}
+	}
+	if resolves < 2 {
+		t.Fatalf("resolutions must be audited, got %d", resolves)
+	}
+}

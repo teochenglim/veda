@@ -43,10 +43,11 @@ type RecallOut struct {
 }
 
 type ListIn struct {
-	Type    string `json:"type,omitempty" jsonschema:"filter by memory type"`
-	AgentID string `json:"agent_id,omitempty" jsonschema:"filter by creating agent"`
-	Since   int64  `json:"since,omitempty" jsonschema:"unix seconds lower bound on created_at"`
-	Until   int64  `json:"until,omitempty" jsonschema:"unix seconds upper bound on created_at"`
+	Type              string `json:"type,omitempty" jsonschema:"filter by memory type"`
+	AgentID           string `json:"agent_id,omitempty" jsonschema:"filter by creating agent"`
+	Since             int64  `json:"since,omitempty" jsonschema:"unix seconds lower bound on created_at"`
+	Until             int64  `json:"until,omitempty" jsonschema:"unix seconds upper bound on created_at"`
+	IncludeSuperseded bool   `json:"include_superseded,omitempty" jsonschema:"true = also return memories replaced by newer conflicting ones"`
 }
 type ListOut struct {
 	Memories []*store.Memory `json:"memories"`
@@ -113,7 +114,7 @@ func New(s *store.Store, embedder store.Embedder, agentID string) *mcp.Server {
 		Name:        "list",
 		Description: "List the user's memories, optionally filtered by type, agent, or time range.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in ListIn) (*mcp.CallToolResult, *ListOut, error) {
-		mems, err := s.List(in.Type, in.AgentID, unixTime(in.Since), unixTime(in.Until), 0)
+		mems, err := s.List(in.Type, in.AgentID, unixTime(in.Since), unixTime(in.Until), 0, in.IncludeSuperseded)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -50,7 +50,7 @@ func TestAC5_WorkerWithoutLLMKeepsPending(t *testing.T) {
 	if pending[0].Content != "I prefer window seats on every flight" {
 		t.Fatalf("wrong pending content: %q", pending[0].Content)
 	}
-	mems, _ := s.List("", "", time.Time{}, time.Time{}, 0)
+	mems, _ := s.List("", "", time.Time{}, time.Time{}, 0, false)
 	if len(mems) != 0 {
 		t.Fatalf("no memories may be created without an LLM key, got %d", len(mems))
 	}
@@ -91,7 +91,7 @@ func TestAC5_WorkerWithLLMCreatesMemories(t *testing.T) {
 	if err := wk.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	mems, err := s.List("", "", time.Time{}, time.Time{}, 0)
+	mems, err := s.List("", "", time.Time{}, time.Time{}, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

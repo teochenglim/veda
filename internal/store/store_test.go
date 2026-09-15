@@ -132,7 +132,7 @@ func TestAC2b_ForgetListAuditTTL(t *testing.T) {
 		t.Fatalf("audit log wrong: %v", actions)
 	}
 	// List filters
-	mems, _ := s.List("goal", "", time.Time{}, time.Time{}, 0)
+	mems, _ := s.List("goal", "", time.Time{}, time.Time{}, 0, false)
 	if len(mems) != 0 {
 		t.Fatalf("deleted memory must not be listed, got %+v", mems)
 	}
@@ -168,7 +168,7 @@ func TestAC10_ExportImportRoundTrip(t *testing.T) {
 	if n, _ := dst.Import(data); n != 0 {
 		t.Fatalf("re-import should skip existing ids, got %d", n)
 	}
-	got, _ := dst.List("", "", time.Time{}, time.Time{}, 0)
+	got, _ := dst.List("", "", time.Time{}, time.Time{}, 0, false)
 	if len(got) != 3 {
 		t.Fatalf("round-trip lost memories: %d", len(got))
 	}

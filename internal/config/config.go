@@ -92,7 +92,7 @@ func Default() *Config {
 		Embed: EmbedConfig{
 			Enabled:   false,
 			BaseURL:   "http://localhost:11434/v1", // Ollama default
-			Model:     "nomic-embed-text",
+			Model:     "bge-m3",
 			APIKeyEnv: "VEDA_EMBED_API_KEY",
 		},
 		Telemetry: TelemetryConfig{

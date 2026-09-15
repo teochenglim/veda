@@ -34,6 +34,8 @@ func (sv *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/memories/update", sv.handleUpdate)
 	mux.HandleFunc("POST /api/memories/delete", sv.handleDelete)
 	mux.HandleFunc("GET /api/audit", sv.handleAudit)
+	mux.HandleFunc("GET /api/conflicts", sv.handleConflicts)
+	mux.HandleFunc("POST /api/conflicts/resolve", sv.handleResolveConflict)
 	mux.HandleFunc("GET /api/digest", sv.handleDigest)
 	return mux
 }
@@ -119,7 +121,7 @@ func (sv *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (sv *Server) handleMemories(w http.ResponseWriter, r *http.Request) {
-	mems, err := sv.Store.List(r.URL.Query().Get("type"), r.URL.Query().Get("agent_id"), time.Time{}, time.Time{}, 0)
+	mems, err := sv.Store.List(r.URL.Query().Get("type"), r.URL.Query().Get("agent_id"), time.Time{}, time.Time{}, 0, r.URL.Query().Get("superseded") == "1")
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -172,6 +174,38 @@ func (sv *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		entries = []*store.AuditEntry{}
 	}
 	writeJSON(w, entries)
+}
+
+func (sv *Server) handleConflicts(w http.ResponseWriter, r *http.Request) {
+	conflicts, err := sv.Store.ListConflicts(0)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	if conflicts == nil {
+		conflicts = []*store.Conflict{}
+	}
+	writeJSON(w, conflicts)
+}
+
+func (sv *Server) handleResolveConflict(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID         int64  `json:"id"`
+		Resolution string `json:"resolution"` // new | old | both
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if err := sv.Store.ResolveConflict(in.ID, in.Resolution, "ui"); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, 404, err)
+			return
+		}
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (sv *Server) handleDigest(w http.ResponseWriter, r *http.Request) {

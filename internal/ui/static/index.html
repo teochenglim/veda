@@ -35,6 +35,7 @@
 <header><h1>Veda</h1><span>the knowledge of you, owned by you</span></header>
 <nav>
   <button data-tab="pending" class="active">Pending</button>
+  <button data-tab="conflicts">Conflicts</button>
   <button data-tab="all">All</button>
   <button data-tab="audit">Audit</button>
   <button data-tab="digest">Digest</button>
@@ -58,11 +59,37 @@ async function load() {
   main.innerHTML = '<div class="empty">Loading…</div>';
   try {
     if (tab === 'pending') await renderPending();
+    else if (tab === 'conflicts') await renderConflicts();
     else if (tab === 'all') await renderAll();
     else if (tab === 'audit') await renderAudit();
     else await renderDigest();
   } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+
+// v0.3: supersession conflicts — the old memory was auto-replaced by the
+// new one; the human can keep the new one (default), reinstate the old one,
+// or keep both when the detector was wrong.
+async function renderConflicts() {
+  const items = await api('/api/conflicts');
+  if (!items.length) { main.innerHTML = '<div class="empty">No conflicts detected. Superseded memory pairs show up here.</div>'; return; }
+  main.innerHTML = items.map(c => `
+    <div class="card">
+      <div class="meta"><span class="tag">conflict #${c.id}</span>
+        <span>resolution: <b>${esc(c.resolution)}</b></span>
+        <span>${new Date(c.detected_at * 1000).toLocaleString()}</span></div>
+      <div class="content"><s>${esc(c.old_content)}</s> <span style="color:var(--dim)">(${esc(c.old_status)})</span></div>
+      <div class="content">${esc(c.new_content)} <span style="color:var(--dim)">(${esc(c.new_status)})</span></div>
+      <div class="row">
+        <button class="act" onclick="resolve(${c.id},'new')">Prefer new</button>
+        <button class="act" onclick="resolve(${c.id},'old')">Prefer old</button>
+        <button class="act" onclick="resolve(${c.id},'both')">Keep both</button>
+      </div>
+    </div>`).join('');
+}
+window.resolve = async (id, resolution) => {
+  await post('/api/conflicts/resolve', {id, resolution});
+  load();
+};
 
 async function renderPending() {
   const items = await api('/api/pending');

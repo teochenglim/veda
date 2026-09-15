@@ -70,7 +70,7 @@ To identify which agent wrote a memory, give each one a name:
 |---|---|
 | `remember(content, type?, ttl_seconds?)` | Save a durable fact or preference now |
 | `recall(query, limit?, min_confidence?, semantic?)` | Hybrid keyword+semantic search over your memories |
-| `list(type?, agent_id?, since?, until?)` | Browse memories |
+| `list(type?, agent_id?, since?, until?, include_superseded?)` | Browse memories |
 | `forget(id)` | Delete a memory (soft delete, audited) |
 | `export()` | Dump the whole store as JSON |
 
@@ -103,7 +103,7 @@ a local Ollama or LM Studio keeps everything on your machine:
 [embed]
 enabled = true
 base_url = "http://localhost:11434/v1"   # Ollama default
-model = "nomic-embed-text"
+model = "bge-m3"
 # api_key_env = "VEDA_EMBED_API_KEY"     # only for hosted providers
 ```
 
@@ -111,6 +111,22 @@ The worker backfills vectors for existing memories automatically — no
 migration, no re-import. If the embedding endpoint is down, recall quietly
 falls back to keyword-only. Nothing is ever sent anywhere except the URL you
 configure.
+
+## Conflict resolution (v0.3)
+
+When one agent writes "User lives in Singapore" and another later writes
+"User moved to Tokyo", Veda detects the contradiction on write and marks the
+older memory **superseded** — recall then answers with the current side
+only, on every path (keyword, hybrid, semantic).
+
+Detection is instant heuristics (life-slot changes like residence/employer/
+tool, plus explicit "no longer…" retractions) — no LLM call, and it fails
+open: unsure pairs are simply kept both.
+
+Every detected pair lands in the review UI's **Conflicts** tab where you can
+**Prefer new** (the default), **Prefer old**, or **Keep both** — all audited.
+Superseded memories aren't deleted; `list(include_superseded: true)` shows
+them with the replacement named. Existing databases upgrade in place.
 
 ## Teach Veda about you (optional summarization)
 
