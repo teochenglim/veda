@@ -19,6 +19,7 @@ import (
 
 	"github.com/teochenglim/veda/internal/config"
 	"github.com/teochenglim/veda/internal/embed"
+	"github.com/teochenglim/veda/internal/eval"
 	"github.com/teochenglim/veda/internal/llm"
 	"github.com/teochenglim/veda/internal/mcpserver"
 	"github.com/teochenglim/veda/internal/store"
@@ -57,6 +58,8 @@ func main() {
 		err = cmdTelemetry(rest)
 	case "sync":
 		err = cmdSync(rest)
+	case "eval":
+		err = cmdEval(rest)
 	case "version", "--version", "-v":
 		fmt.Println("veda " + version)
 	case "help", "--help", "-h":
@@ -84,6 +87,7 @@ Usage:
   veda import -f file                Import memories from a JSON export
   veda telemetry status|disable|preview|export|forget   Manage anonymous stats (default: off)
   veda sync status|push|pull         Cross-device sync (paid tier, default: off)
+  veda eval -f suite.json            Score recall scenarios against a throwaway store
   veda version                       Print the version
 
 Learn more: README.md
@@ -226,6 +230,91 @@ func cmdServe(args []string) error {
 
 func syncEngine(s *store.Store, cfg *config.Config) *syncengine.Engine {
 	return &syncengine.Engine{Store: s, Cfg: cfg.Sync}
+}
+
+// --- veda eval ----------------------------------------------------------------
+
+// eval runs fixture scenarios against throwaway stores — the user's real
+// ~/.veda is never opened.
+func cmdEval(args []string) error {
+	fs := flag.NewFlagSet("eval", flag.ExitOnError)
+	file := fs.String("f", "", "scenario file (single scenario or suite) (required)")
+	report := fs.String("report", "", "write the full JSON report to this file")
+	uploadURL := fs.String("upload-url", "", "upload anonymized aggregate scores (paid tier)")
+	fs.Parse(args)
+	if *file == "" {
+		return fmt.Errorf("usage: veda eval -f <scenario-file> [--report out.json] [--upload-url url]")
+	}
+	data, err := os.ReadFile(*file)
+	if err != nil {
+		return err
+	}
+	scenarios, err := eval.Load(data)
+	if err != nil {
+		return err
+	}
+	cfg, _ := config.Load()
+	opts := eval.Options{}
+	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
+		opts.Embedder = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
+	}
+	if key := cfg.APIKey(); key != "" {
+		opts.Distiller = llm.New(cfg.LLM.BaseURL, key, cfg.LLM.Model)
+	}
+
+	ctx := context.Background()
+	aggregate := struct {
+		Version   string         `json:"version"`
+		Passed    bool           `json:"passed"`
+		Scenarios int            `json:"scenarios"`
+		Failed    int            `json:"failed"`
+		Reports   []*eval.Report `json:"reports"`
+	}{Version: version, Passed: true, Scenarios: len(scenarios)}
+	for _, sc := range scenarios {
+		rep, err := eval.Run(sc, opts)
+		if err != nil {
+			return fmt.Errorf("scenario %q: %w", sc.Name, err)
+		}
+		aggregate.Reports = append(aggregate.Reports, rep)
+		status := "PASS"
+		if !rep.Passed {
+			status = "FAIL"
+			aggregate.Failed++
+		}
+		fmt.Printf("%s  %s  (recall %.0f%%)", status, sc.Name, rep.Score*100)
+		if rep.Interference != nil {
+			fmt.Printf("  interference drop %.2f", rep.Interference.Drop)
+		}
+		if rep.Faithfulness != nil {
+			fmt.Printf("  faithfulness avg %.2f (%d flagged)", rep.Faithfulness.AvgScore, rep.Faithfulness.Flagged)
+		}
+		fmt.Println()
+		for _, c := range rep.Cases {
+			if !c.Passed {
+				fmt.Printf("       case %q: %s\n", c.Query, strings.Join(c.Failures, "; "))
+			}
+		}
+		if !rep.Passed {
+			aggregate.Passed = false
+		}
+	}
+	if *report != "" {
+		b, _ := json.MarshalIndent(aggregate, "", "  ")
+		if err := os.WriteFile(*report, b, 0o600); err != nil {
+			return err
+		}
+		fmt.Printf("report written to %s\n", *report)
+	}
+	if *uploadURL != "" {
+		if err := eval.UploadAggregate(ctx, *uploadURL, cfg.SyncToken(), version, aggregate.Reports); err != nil {
+			return err
+		}
+		fmt.Println("aggregate scores uploaded")
+	}
+	if !aggregate.Passed {
+		return fmt.Errorf("%d/%d scenarios failed", aggregate.Failed, aggregate.Scenarios)
+	}
+	return nil
 }
 
 // --- veda sync ----------------------------------------------------------------

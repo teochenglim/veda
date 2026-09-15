@@ -62,16 +62,18 @@ Same single opt-in consent, same counts-and-enums-only guarantee — more signal
 
 Details: [RELEASE/v0.5.0.md](RELEASE/v0.5.0.md)
 
-## v0.6.0 — Advanced eval harness (paid) 💰
+## v0.6.0 — Advanced eval harness (paid) 💰 ✅
 
-The moat. Cross-install recall benchmarks, interference detection,
-faithfulness scoring of distilled memories.
+The moat. Every launch-post failure report becomes a fixture scenario.
 
-- [ ] Scenario format: fixture conversations + expected recalls
-- [ ] `veda eval` runs a suite against any config and scores it
-- [ ] Paid tier: cross-install benchmarks, interference detection
+- [x] Scenario format: fixture conversations + expected recalls (`expect_contains` / `expect_not_contains`, top-k, semantic mode)
+- [x] `veda eval` scores suites against a throwaway store (real `~/.veda` never touched), exits non-zero on failure, `--report` JSON
+- [x] Interference detection: guard cases before/after disruptor ingestion
+- [x] Faithfulness scoring: flags distilled memories not attributable to source turns
+- [x] Paid tier: `--upload-url` cross-install benchmarks, 402 gate, aggregates-only payload
+- [ ] Benchmark backend repo deploy *(launch task)*
 
-Details: [RELEASE/v0.6.0.md](RELEASE/v0.6.0.md)
+Details: [RELEASE/v0.6.0.md](RELEASE/v0.6.0.md) · design in [DESIGN/13](DESIGN/13_design_eval_harness.md)
 
 ## v0.7.0 — Team compliance / audit export (paid) 💰
 

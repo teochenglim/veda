@@ -177,6 +177,33 @@ veda sync pull      # fetch + merge other devices' changes
 Sync is off by default and makes zero network calls until enabled; the
 local product stays free forever.
 
+## Eval harness (v0.6, paid tier for uploads)
+
+Score Veda's recall against your own fixtures — the scenarios every failure
+report becomes:
+
+```json
+{
+  "name": "residence-move",
+  "setup": {"memories": [{"content": "User lives in Tokyo"}]},
+  "cases": [{"query": "lives Tokyo", "expect_contains": ["Tokyo"]}],
+  "interference": {
+    "disrupt": {"memories": [{"content": "User now lives in Osaka", "salience": 1.0}]},
+    "guard": [{"query": "lives", "expect_contains": ["Tokyo"]}]
+  }
+}
+```
+
+```sh
+veda eval -f suite.json --report report.json
+```
+
+Runs against a throwaway store — your real memories are never touched.
+Measures recall@k pass rates, interference (does learning new facts wipe
+out old ones?), and faithfulness (did distillation invent anything?).
+Exits non-zero on failure, so it drops straight into CI. Uploading
+anonymized aggregate scores for cross-install benchmarks is the paid tier.
+
 ## Export / import — portable by design
 
 ```sh
