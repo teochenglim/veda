@@ -22,6 +22,7 @@ import (
 	"github.com/teochenglim/veda/internal/llm"
 	"github.com/teochenglim/veda/internal/mcpserver"
 	"github.com/teochenglim/veda/internal/store"
+	"github.com/teochenglim/veda/internal/syncengine"
 	"github.com/teochenglim/veda/internal/telemetry"
 	"github.com/teochenglim/veda/internal/ui"
 	"github.com/teochenglim/veda/internal/wal"
@@ -54,6 +55,8 @@ func main() {
 		err = cmdImport(rest)
 	case "telemetry":
 		err = cmdTelemetry(rest)
+	case "sync":
+		err = cmdSync(rest)
 	case "version", "--version", "-v":
 		fmt.Println("veda " + version)
 	case "help", "--help", "-h":
@@ -80,6 +83,7 @@ Usage:
   veda export [-o file]              Export all memories as JSON
   veda import -f file                Import memories from a JSON export
   veda telemetry status|disable|preview|export|forget   Manage anonymous stats (default: off)
+  veda sync status|push|pull         Cross-device sync (paid tier, default: off)
   veda version                       Print the version
 
 Learn more: README.md
@@ -202,7 +206,76 @@ func cmdServe(args []string) error {
 		telemetry.StartFlusher(ctx, s, cfg.Telemetry.URL,
 			time.Duration(cfg.Telemetry.FlushHours)*time.Hour, cfg.Telemetry.InstallID, version)
 	}
+	if cfg.Sync.Enabled && cfg.Sync.URL != "" {
+		syncEngine(s, cfg).RunBackgroundLoop(ctx)
+	}
 	return mcpserver.Run(s, em)
+}
+
+func syncEngine(s *store.Store, cfg *config.Config) *syncengine.Engine {
+	return &syncengine.Engine{Store: s, Cfg: cfg.Sync}
+}
+
+// --- veda sync ----------------------------------------------------------------
+
+func cmdSync(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: veda sync <status|push|pull>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	eng := syncEngine(s, cfg)
+	switch args[0] {
+	case "status":
+		st, err := eng.Status()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("sync:      %s\n", onOff(st.Enabled))
+		fmt.Printf("endpoint:  %s\n", st.Endpoint)
+		fmt.Printf("device_id: %s\n", st.DeviceID)
+		fmt.Printf("token:     %s\n", configured(st.TokenConfigured))
+		fmt.Printf("passphrase: %s\n", configured(st.PassphraseConfigured))
+		fmt.Printf("last push seq: %d\n", st.LastPushSeq)
+		fmt.Printf("pending:   %d memories, %d tombstones\n", st.PendingMemories, st.PendingTombstones)
+		if !st.Enabled {
+			fmt.Println("\nSync is the paid tier — set [sync] enabled/url in config.toml, then")
+			fmt.Printf("export %s and %s. Local features stay free forever.\n",
+				cfg.Sync.TokenEnv, cfg.Sync.PassphraseEnv)
+		}
+		return nil
+	case "push":
+		out, err := eng.Push(context.Background())
+		fmt.Println(out)
+		return err
+	case "pull":
+		out, err := eng.Pull(context.Background())
+		fmt.Println(out)
+		return err
+	default:
+		return fmt.Errorf("unknown sync command %q", args[0])
+	}
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off (default)"
+}
+
+func configured(yes bool) string {
+	if yes {
+		return "configured"
+	}
+	return "not set"
 }
 
 // --- veda ui ----------------------------------------------------------------

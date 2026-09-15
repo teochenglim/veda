@@ -43,12 +43,13 @@ Details: [RELEASE/v0.3.0.md](RELEASE/v0.3.0.md) · design in [DESIGN/11](DESIGN/
 
 ## v0.4.0 — Hosted sync (first paid tier) 💰
 
-- [ ] End-to-end encrypted cross-device sync (ciphertext-only server)
-- [ ] Tombstone-based deletes, last-writer-wins per memory
-- [ ] `veda sync status / push / pull`
-- [ ] Pricing: $5–15/mo (local features stay free forever)
+- [x] End-to-end encrypted cross-device sync (ciphertext-only server; passphrase never leaves the device)
+- [x] Tombstone-based deletes, last-writer-wins per memory (change-log sequence watermark)
+- [x] `veda sync status / push / pull` + background merge loop on `serve`
+- [x] Billing hook: backend `402` ⇒ explicit paid-feature error (local features stay free forever)
+- [ ] Server rollout: backend repo deploy + plan tokens *(launch task)*
 
-Details: [RELEASE/v0.4.0.md](RELEASE/v0.4.0.md)
+Details: [RELEASE/v0.4.0.md](RELEASE/v0.4.0.md) · design in [DESIGN/12](DESIGN/12_design_hosted_sync.md)
 
 ## v0.5.0 — Advanced eval harness (paid) 💰
 

@@ -31,8 +31,8 @@ type Memory struct {
 	Salience      float64 `json:"salience"`
 	CreatedAt     int64   `json:"created_at"`
 	UpdatedAt     int64   `json:"updated_at"`
-	TTL           int64   `json:"ttl,omitempty"` // unix seconds; 0 = never expires
-	Deleted       bool    `json:"-"`
+	TTL           int64   `json:"ttl,omitempty"`           // unix seconds; 0 = never expires
+	Deleted       bool    `json:"deleted,omitempty"`       // carries across sync bundles
 	Status        string  `json:"status,omitempty"`        // active | superseded
 	SupersededBy  string  `json:"superseded_by,omitempty"` // memory id that replaced this one
 }
@@ -93,6 +93,17 @@ CREATE TABLE IF NOT EXISTS conflicts (
   id INTEGER PRIMARY KEY, old_id TEXT NOT NULL, new_id TEXT NOT NULL,
   detected_at INTEGER, resolution TEXT NOT NULL DEFAULT 'new'
 );
+CREATE TABLE IF NOT EXISTS tombstones (
+  memory_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL, device_id TEXT
+);
+CREATE TABLE IF NOT EXISTS sync_state (
+  key TEXT PRIMARY KEY, value TEXT
+);
+CREATE TABLE IF NOT EXISTS change_log (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  memory_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_change_log_mem ON change_log(memory_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   content, type, content='memories', content_rowid='rowid'
 );
@@ -133,11 +144,15 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
+	// does this database predate the sync change log? (checked before the
+	// schema exec creates it — the answer decides whether the backfill runs)
+	var changeLogExisted bool
+	_ = db.QueryRow(`SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'change_log'`).Scan(&changeLogExisted)
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(changeLogExisted); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -148,7 +163,7 @@ func Open(path string) (*Store, error) {
 // CREATE TABLE IF NOT EXISTS does not touch an existing table, so v0.1/v0.2
 // databases need explicit ALTERs. New columns default their rows into the
 // right state: status 'active', superseded_by ”.
-func (s *Store) migrate() error {
+func (s *Store) migrate(changeLogExisted bool) error {
 	cols := map[string]bool{}
 	rows, err := s.db.Query(`PRAGMA table_info(memories)`)
 	if err != nil {
@@ -186,7 +201,25 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("rebuild fts: %w", err)
 		}
 	}
+	// change-log backfill, first open after a pre-v0.4 upgrade only: those
+	// rows must land in the first v0.4 push (watermark starts at 0). Running
+	// this on every open would re-mark pulled rows as pending push.
+	if !changeLogExisted {
+		if _, err := s.db.Exec(`INSERT INTO change_log (memory_id)
+			SELECT id FROM memories
+			WHERE id NOT IN (SELECT memory_id FROM change_log)`); err != nil {
+			return fmt.Errorf("backfill change log: %w", err)
+		}
+	}
 	return nil
+}
+
+// bumpChange records that a memory changed, for the sync push feed. Called
+// explicitly on every local write path — deliberately NOT on MergeIncoming,
+// so pulled rows never ping-pong back to their origin device.
+func (s *Store) bumpChange(tx *sql.Tx, memoryID string) error {
+	_, err := tx.Exec(`INSERT INTO change_log (memory_id) VALUES (?)`, memoryID)
+	return err
 }
 
 // Embedder produces one vector per input text. Implemented by the
@@ -431,6 +464,10 @@ func (s *Store) Remember(m *Memory, actor string) (string, error) {
 		return "", err
 	}
 	s.Audit(m.ID, "create", actor, "remember")
+	if tx, err := s.db.Begin(); err == nil {
+		_ = s.bumpChange(tx, m.ID)
+		_ = tx.Commit()
+	}
 	s.detectConflicts(m.ID, m.Content, actor)
 	return m.ID, nil
 }
@@ -490,6 +527,9 @@ func (s *Store) supersede(oldID, newID, actor, reason string) error {
 	}
 	if _, err := tx.Exec(`INSERT INTO audit (memory_id, action, actor, reason, ts) VALUES (?,?,?,?,?)`,
 		oldID, "supersede", actor, reason+" (superseded by "+newID+")", time.Now().Unix()); err != nil {
+		return err
+	}
+	if err := s.bumpChange(tx, oldID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -580,6 +620,9 @@ func (s *Store) ResolveConflict(conflictID int64, resolution, actor string) erro
 	for _, id := range []string{oldID, newID} {
 		if _, err := tx.Exec(`INSERT INTO audit (memory_id, action, actor, reason, ts) VALUES (?,?,?,?,?)`,
 			id, "resolve", actor, "conflict #"+fmt.Sprint(conflictID)+" resolved: "+resolution, now); err != nil {
+			return err
+		}
+		if err := s.bumpChange(tx, id); err != nil {
 			return err
 		}
 	}
@@ -723,26 +766,48 @@ func collectMemories(rows *sql.Rows) ([]*Memory, error) {
 // Update rewrites the content (and optionally type) of a memory; used by the
 // review UI's edit action.
 func (s *Store) Update(id, content string) error {
+	now := time.Now().Unix()
 	res, err := s.db.Exec(`UPDATE memories SET content = ?, updated_at = ? WHERE id = ? AND deleted = 0 AND status = 'active'`,
-		content, time.Now().Unix(), id)
+		content, now, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	if tx, err := s.db.Begin(); err == nil {
+		_ = s.bumpChange(tx, id)
+		_ = tx.Commit()
+	}
 	return s.Audit(id, "update", "ui", "edited in review UI")
 }
 
 // Forget soft-deletes a memory and audits it.
 func (s *Store) Forget(id, actor, reason string) (bool, error) {
+	now := time.Now().Unix()
 	res, err := s.db.Exec(`UPDATE memories SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0 AND status = 'active'`,
-		time.Now().Unix(), id)
+		now, id)
 	if err != nil {
 		return false, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return false, nil
+	}
+	deviceID, _ := s.SyncGet("device_id")
+	if tx, err := s.db.Begin(); err == nil {
+		if _, err := tx.Exec(`INSERT INTO tombstones (memory_id, deleted_at, device_id) VALUES (?,?,?)
+			ON CONFLICT(memory_id) DO UPDATE SET deleted_at = MAX(deleted_at, excluded.deleted_at)`,
+			id, now, deviceID); err != nil {
+			tx.Rollback()
+			return false, err
+		}
+		if err := s.bumpChange(tx, id); err != nil {
+			tx.Rollback()
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
 	}
 	return true, s.Audit(id, "forget", actor, reason)
 }
@@ -950,6 +1015,193 @@ func (s *Store) Import(data []byte) (int, error) {
 		imported++
 	}
 	return imported, nil
+}
+
+// --- sync state / change feeds / merge (v0.4) -------------------------------
+
+// SyncGet / SyncSet store small sync bookkeeping values (device id, KDF
+// salt, push watermark, pull cursor).
+func (s *Store) SyncGet(key string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM sync_state WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+func (s *Store) SyncSet(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO sync_state (key, value) VALUES (?,?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// MemoriesSince returns full rows changed since the change-log sequence —
+// the push feed. Includes superseded rows (their status is part of
+// convergence). The sequence (not wall-clock time) is the watermark, so
+// same-second writes after a push are never missed.
+func (s *Store) MemoriesSince(sinceSeq int64) ([]*Memory, error) {
+	rows, err := s.db.Query(`SELECT `+memCols+` WHERE id IN
+		(SELECT DISTINCT memory_id FROM change_log WHERE seq > ?)`, sinceSeq)
+	if err != nil {
+		return nil, err
+	}
+	return collectMemories(rows)
+}
+
+// Tombstone is one cross-device delete.
+type Tombstone struct {
+	MemoryID  string `json:"memory_id"`
+	DeletedAt int64  `json:"deleted_at"`
+	DeviceID  string `json:"device_id,omitempty"`
+}
+
+// TombstonesSince returns the tombstone push feed: deletes recorded since
+// the change-log sequence. Merged-in tombstones have no change-log entry —
+// the origin device already pushed them, so they never re-propagate.
+func (s *Store) TombstonesSince(sinceSeq int64) ([]Tombstone, error) {
+	rows, err := s.db.Query(`SELECT memory_id, deleted_at, device_id FROM tombstones
+		WHERE memory_id IN (SELECT DISTINCT memory_id FROM change_log WHERE seq > ?)
+		ORDER BY deleted_at`, sinceSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Tombstone
+	for rows.Next() {
+		var t Tombstone
+		if err := rows.Scan(&t.MemoryID, &t.DeletedAt, &t.DeviceID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// AllTombstones returns every locally-known tombstone (listing, not the
+// push feed).
+func (s *Store) AllTombstones() ([]Tombstone, error) {
+	rows, err := s.db.Query(`SELECT memory_id, deleted_at, device_id FROM tombstones ORDER BY deleted_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Tombstone
+	for rows.Next() {
+		var t Tombstone
+		if err := rows.Scan(&t.MemoryID, &t.DeletedAt, &t.DeviceID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// MergeIncoming applies a decrypted bundle from another device.
+// Last-writer-wins per memory id on updated_at; a tombstone removes the
+// memory unless the memory was edited after the delete. Deterministic in
+// bundle order (each row merges on its own merits), so both devices
+// converge. Vectors for replaced/removed rows are invalidated — the worker
+// re-embeds them. Returns the number of local changes applied.
+func (s *Store) MergeIncoming(memories []*Memory, tombs []Tombstone) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	applied := 0
+	for _, m := range memories {
+		if m == nil || m.ID == "" {
+			continue
+		}
+		var curUpdated int64
+		var curDeleted int
+		err := tx.QueryRow(`SELECT updated_at, deleted FROM memories WHERE id = ?`, m.ID).Scan(&curUpdated, &curDeleted)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			_, err = tx.Exec(`INSERT INTO memories
+				(id, type, content, source_turn_ids, agent_id, confidence, salience, created_at, updated_at, ttl, deleted, status, superseded_by)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				m.ID, m.Type, m.Content, m.SourceTurnIDs, m.AgentID,
+				m.Confidence, m.Salience, m.CreatedAt, m.UpdatedAt, m.TTL,
+				boolInt(m.Deleted), m.Status, m.SupersededBy)
+			if err != nil {
+				return applied, err
+			}
+			applied++
+		case err != nil:
+			return applied, err
+		case m.UpdatedAt > curUpdated:
+			if _, err := tx.Exec(`UPDATE memories SET type=?, content=?, source_turn_ids=?, agent_id=?,
+				confidence=?, salience=?, created_at=?, updated_at=?, ttl=?, deleted=?, status=?, superseded_by=?
+				WHERE id = ?`,
+				m.Type, m.Content, m.SourceTurnIDs, m.AgentID,
+				m.Confidence, m.Salience, m.CreatedAt, m.UpdatedAt, m.TTL,
+				boolInt(m.Deleted), m.Status, m.SupersededBy, m.ID); err != nil {
+				return applied, err
+			}
+			// derived data for a replaced row is stale
+			if _, err := tx.Exec(`DELETE FROM memories_vec WHERE memory_id = ?`, m.ID); err != nil {
+				return applied, err
+			}
+			applied++
+		}
+	}
+	for _, t := range tombs {
+		if _, err := tx.Exec(`INSERT INTO tombstones (memory_id, deleted_at, device_id) VALUES (?,?,?)
+			ON CONFLICT(memory_id) DO UPDATE SET deleted_at = MAX(deleted_at, excluded.deleted_at)`,
+			t.MemoryID, t.DeletedAt, t.DeviceID); err != nil {
+			return applied, err
+		}
+		var curUpdated int64
+		var curDeleted int
+		err := tx.QueryRow(`SELECT updated_at, deleted FROM memories WHERE id = ?`, t.MemoryID).Scan(&curUpdated, &curDeleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // nothing local to remove
+		}
+		if err != nil {
+			return applied, err
+		}
+		if curDeleted == 0 && curUpdated <= t.DeletedAt {
+			if _, err := tx.Exec(`UPDATE memories SET deleted = 1, updated_at = ? WHERE id = ?`, t.DeletedAt, t.MemoryID); err != nil {
+				return applied, err
+			}
+			if _, err := tx.Exec(`DELETE FROM memories_vec WHERE memory_id = ?`, t.MemoryID); err != nil {
+				return applied, err
+			}
+			applied++
+		}
+	}
+	return applied, tx.Commit()
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// SyncPendingCounts reports how many memories and tombstones changed since
+// the change-log sequence — the `sync status` pending numbers.
+func (s *Store) SyncPendingCounts(sinceSeq int64) (int64, int64, error) {
+	var mem, tomb int64
+	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT memory_id) FROM change_log WHERE seq > ?`, sinceSeq).Scan(&mem); err != nil {
+		return 0, 0, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tombstones
+		WHERE memory_id IN (SELECT DISTINCT memory_id FROM change_log WHERE seq > ?)`, sinceSeq).Scan(&tomb); err != nil {
+		return 0, 0, err
+	}
+	return mem, tomb, nil
+}
+
+// ChangeLogHead returns the current change-log sequence (the push watermark
+// after a successful push).
+func (s *Store) ChangeLogHead() (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM change_log`).Scan(&n)
+	return n, err
 }
 
 // --- stats / telemetry queue ----------------------------------------------

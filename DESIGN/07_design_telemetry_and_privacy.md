@@ -38,7 +38,7 @@ disable ⇒ nothing further queued or sent (queued rows stay local,
 `veda telemetry preview` prints the exact next payload with no consent
 requirement — inspection must never require opting in.
 
-## Backend is a separate repository
+## Backend is a separate repository (contract: [prd.cloudflare.md](../prd.cloudflare.md))
 
 The Cloudflare Worker (D1 insert on POST, DELETE-by-install_id) ships in its
 own repo and is deployed independently; Veda only stores the endpoint URL in

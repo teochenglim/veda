@@ -20,6 +20,7 @@ type Config struct {
 	Worker    WorkerConfig    `toml:"worker"`
 	UI        UIConfig        `toml:"ui"`
 	Telemetry TelemetryConfig `toml:"telemetry"`
+	Sync      SyncConfig      `toml:"sync"`
 }
 
 type LLMConfig struct {
@@ -40,6 +41,21 @@ type EmbedConfig struct {
 	Model   string `toml:"model"`
 	// APIKeyEnv is optional — local servers need no key.
 	APIKeyEnv string `toml:"api_key_env"`
+}
+
+type SyncConfig struct {
+	// Enabled defaults to false: hosted sync is the paid tier and never
+	// makes a network call until the user turns it on.
+	Enabled bool `toml:"enabled"`
+	// URL is the sync backend base (external repo, Supabase-based).
+	URL string `toml:"url"`
+	// TokenEnv names the env var holding the paid-plan bearer token.
+	TokenEnv string `toml:"token_env"`
+	// PassphraseEnv names the env var holding the end-to-end sync
+	// passphrase. The derived key never leaves the device; the passphrase
+	// is never stored.
+	PassphraseEnv   string `toml:"passphrase_env"`
+	IntervalMinutes int    `toml:"interval_minutes"`
 }
 
 type WorkerConfig struct {
@@ -89,6 +105,12 @@ func Default() *Config {
 		},
 		Worker: WorkerConfig{IntervalMinutes: 15, BatchSize: 20},
 		UI:     UIConfig{Bind: "127.0.0.1:7331"},
+		Sync: SyncConfig{
+			Enabled:       false,
+			URL:           "",
+			TokenEnv:      "VEDA_SYNC_TOKEN",
+			PassphraseEnv: "VEDA_SYNC_PASSPHRASE",
+		},
 		Embed: EmbedConfig{
 			Enabled:   false,
 			BaseURL:   "http://localhost:11434/v1", // Ollama default
@@ -109,6 +131,22 @@ func (c *Config) APIKey() string {
 		return ""
 	}
 	return os.Getenv(c.LLM.APIKeyEnv)
+}
+
+// SyncToken resolves the paid-plan bearer token from the environment.
+func (c *Config) SyncToken() string {
+	if c.Sync.TokenEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.Sync.TokenEnv)
+}
+
+// SyncPassphrase resolves the end-to-end sync passphrase from the environment.
+func (c *Config) SyncPassphrase() string {
+	if c.Sync.PassphraseEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.Sync.PassphraseEnv)
 }
 
 // EmbedAPIKey resolves the optional embedding key from the environment.

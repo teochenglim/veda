@@ -150,6 +150,33 @@ Without a key, nothing is summarized — candidates simply wait in **Pending**
 for you to review. You can also run one pipeline pass manually:
 `veda worker`.
 
+## Hosted sync (v0.4, paid tier)
+
+Sync your memory across machines, end-to-end encrypted: bundles are sealed
+on your device with a key derived from your sync passphrase (which lives
+only in your environment), and the server stores ciphertext it can never
+read. Deletes propagate as tombstones; edits merge last-writer-wins.
+
+```toml
+# ~/.veda/config.toml
+[sync]
+enabled = true
+url = "https://sync.example.dev"          # backend (separate repo)
+token_env = "VEDA_SYNC_TOKEN"             # your plan token
+passphrase_env = "VEDA_SYNC_PASSPHRASE"   # E2E key material — never stored
+```
+
+```sh
+export VEDA_SYNC_PASSPHRASE="…"
+veda sync status    # device id, pending changes
+veda sync push      # seal + upload local changes
+veda sync pull      # fetch + merge other devices' changes
+```
+
+`veda serve` merges in the background every 15 minutes while sync is on.
+Sync is off by default and makes zero network calls until enabled; the
+local product stays free forever.
+
 ## Export / import — portable by design
 
 ```sh
@@ -169,7 +196,9 @@ veda telemetry forget     # ask the endpoint to erase your install id (GDPR)
 
 What is sent (only if you ever opt in): counts, recall hit rate, error codes,
 OS/arch, a random install id. What is **never** sent: your memories,
-conversations, API keys, or identity.
+conversations, API keys, or identity. The optional ingest endpoint is a tiny
+Cloudflare Worker deployed from its own repo — contract in
+[prd.cloudflare.md](prd.cloudflare.md).
 
 ## All commands
 
@@ -191,9 +220,8 @@ veda version             Print the version
 See the full plan in [ROADMAP.md](ROADMAP.md) — sync and conflict resolution
 are coming; everything hosted stays out of the local product.
 
-- Cross-device sync (planned v0.4, paid)
-- Cross-agent conflict resolution (v0.3)
-- Anything hosted. Local only.
+- Cross-agent conflict resolution ✅ (shipped v0.3) — see ROADMAP for what's next
+- Anything hosted beyond opt-in sync: local-only by default
 
 ## Privacy model
 
