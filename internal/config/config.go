@@ -16,6 +16,7 @@ import (
 // disk; it is read from the environment variable named by LLM.APIKeyEnv.
 type Config struct {
 	LLM       LLMConfig       `toml:"llm"`
+	Embed     EmbedConfig     `toml:"embed"`
 	Worker    WorkerConfig    `toml:"worker"`
 	UI        UIConfig        `toml:"ui"`
 	Telemetry TelemetryConfig `toml:"telemetry"`
@@ -26,6 +27,18 @@ type LLMConfig struct {
 	BaseURL string `toml:"base_url"`
 	Model   string `toml:"model"`
 	// APIKeyEnv names the environment variable holding the key, e.g. VEDA_LLM_API_KEY.
+	APIKeyEnv string `toml:"api_key_env"`
+}
+
+type EmbedConfig struct {
+	// Enabled defaults to false: semantic recall never makes a network call
+	// unless the user opts in.
+	Enabled bool `toml:"enabled"`
+	// BaseURL is any OpenAI-compatible /v1 endpoint; a localhost URL (Ollama,
+	// LM Studio) keeps embeddings on the machine.
+	BaseURL string `toml:"base_url"`
+	Model   string `toml:"model"`
+	// APIKeyEnv is optional — local servers need no key.
 	APIKeyEnv string `toml:"api_key_env"`
 }
 
@@ -76,6 +89,12 @@ func Default() *Config {
 		},
 		Worker: WorkerConfig{IntervalMinutes: 15, BatchSize: 20},
 		UI:     UIConfig{Bind: "127.0.0.1:7331"},
+		Embed: EmbedConfig{
+			Enabled:   false,
+			BaseURL:   "http://localhost:11434/v1", // Ollama default
+			Model:     "nomic-embed-text",
+			APIKeyEnv: "VEDA_EMBED_API_KEY",
+		},
 		Telemetry: TelemetryConfig{
 			Enabled:    false,
 			URL:        "", // set after the backend repo is deployed
@@ -90,6 +109,14 @@ func (c *Config) APIKey() string {
 		return ""
 	}
 	return os.Getenv(c.LLM.APIKeyEnv)
+}
+
+// EmbedAPIKey resolves the optional embedding key from the environment.
+func (c *Config) EmbedAPIKey() string {
+	if c.Embed.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.Embed.APIKeyEnv)
 }
 
 // Load reads config.toml from the Veda home. A missing file yields Default.

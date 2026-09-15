@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,5 +132,55 @@ func TestAC5_WorkerRetriesAfterLLMFailure(t *testing.T) {
 	pending, _ := s.ListPending(0)
 	if len(pending) != 1 {
 		t.Fatalf("failed batch must be requeued, %d pending", len(pending))
+	}
+}
+
+// fake embedder for backfill tests: deterministic vector per text.
+type backfillEmbedder struct{ err error }
+
+func (b backfillEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		out[i] = []float32{float32(i + 1), 0.5}
+	}
+	return out, nil
+}
+
+// v0.2: the worker backfills embeddings for memories missing vectors.
+func TestWorkerBackfillsEmbeddings(t *testing.T) {
+	s, w := setup(t)
+	s.Remember(&store.Memory{Content: "User prefers window seats on every flight"}, "mcp")
+	s.Remember(&store.Memory{Content: "User's daughter Ada is six years old"}, "mcp")
+
+	wk := &Worker{Store: s, WAL: w, Embedder: backfillEmbedder{}, Batch: 20}
+	if err := wk.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.CountEmbedded(); n != 2 {
+		t.Fatalf("expected both memories embedded, got %d", n)
+	}
+	// a second pass is a no-op (nothing left to backfill)
+	if err := wk.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.CountEmbedded(); n != 2 {
+		t.Fatalf("backfill must be idempotent, got %d", n)
+	}
+}
+
+// v0.2: an embedder failure during backfill must not fail the whole pass.
+func TestWorkerBackfillEmbedderFailureIsBestEffort(t *testing.T) {
+	s, w := setup(t)
+	s.Remember(&store.Memory{Content: "User prefers window seats on every flight"}, "mcp")
+
+	wk := &Worker{Store: s, WAL: w, Embedder: backfillEmbedder{err: errors.New("down")}, Batch: 20}
+	if err := wk.RunOnce(context.Background()); err != nil {
+		t.Fatalf("backfill failure must be swallowed: %v", err)
+	}
+	if n, _ := s.CountEmbedded(); n != 0 {
+		t.Fatalf("no vectors should exist, got %d", n)
 	}
 }

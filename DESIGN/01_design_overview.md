@@ -28,6 +28,7 @@ requirement does:
 | Cheap gate | `internal/gate` | regex + length + role candidate filter (no LLM) |
 | Async worker | `internal/worker` | drain → gate → batch → distill loop |
 | LLM client | `internal/llm` | OpenAI-compatible chat-completions, JSON fact parsing |
+| Embeddings | `internal/embed` | OpenAI-compatible `/embeddings` client for semantic recall (v0.2) |
 | MCP server | `internal/mcpserver` | the five spec tools over stdio |
 | Review UI | `internal/ui` | embedded SPA + JSON API on 127.0.0.1:7331 |
 | Telemetry | `internal/telemetry` | opt-in counts-only queue/flush/erase |

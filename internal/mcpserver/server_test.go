@@ -18,7 +18,7 @@ func session(t *testing.T) (*mcp.ClientSession, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	srv := New(s, "test", "test-agent")
+	srv := New(s, nil, "test-agent")
 	ctx := context.Background()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
 	ct, st := mcp.NewInMemoryTransports()

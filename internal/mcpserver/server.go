@@ -36,6 +36,7 @@ type RecallIn struct {
 	Query         string  `json:"query" jsonschema:"free-text search over memories"`
 	Limit         int     `json:"limit,omitempty" jsonschema:"max results (default 5)"`
 	MinConfidence float64 `json:"min_confidence,omitempty" jsonschema:"minimum confidence 0..1 (default 0.5)"`
+	Semantic      bool    `json:"semantic,omitempty" jsonschema:"true = pure semantic (embedding) ranking; default is hybrid keyword+semantic"`
 }
 type RecallOut struct {
 	Memories []*store.Memory `json:"memories"`
@@ -65,8 +66,8 @@ type ExportOut struct {
 
 // --- server ---------------------------------------------------------------
 
-// New builds the MCP server. It blocks until ctx or the client disconnects.
-func New(s *store.Store, sessionID, agentID string) *mcp.Server {
+// New builds the MCP server. embedder may be nil ⇒ keyword-only recall.
+func New(s *store.Store, embedder store.Embedder, agentID string) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "veda", Version: Version}, nil)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -100,7 +101,7 @@ func New(s *store.Store, sessionID, agentID string) *mcp.Server {
 		if minConf <= 0 {
 			minConf = 0.5
 		}
-		mems, err := s.Recall(in.Query, limit, minConf)
+		mems, err := s.RecallHybrid(ctx, in.Query, limit, minConf, embedder, in.Semantic)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -141,7 +142,6 @@ func New(s *store.Store, sessionID, agentID string) *mcp.Server {
 		return nil, &ExportOut{JSON: string(data)}, nil
 	})
 
-	_ = sessionID
 	return srv
 }
 
@@ -152,9 +152,9 @@ func unixTime(ts int64) time.Time {
 	return time.Unix(ts, 0)
 }
 
-// Run serves MCP over stdio until the client disconnects.
-func Run(s *store.Store) error {
-	srv := New(s, "stdio", agentFromEnv())
+// Run serves MCP over stdio until the client disconnects. embedder may be nil.
+func Run(s *store.Store, embedder store.Embedder) error {
+	srv := New(s, embedder, agentFromEnv())
 	return srv.Run(context.Background(), &mcp.StdioTransport{})
 }
 

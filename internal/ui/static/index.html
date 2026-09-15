@@ -137,6 +137,7 @@ async function renderDigest() {
   const hitRate = s.recall_calls > 0 ? (100 * s.recall_hits / s.recall_calls).toFixed(1) + '%' : '—';
   main.innerHTML = `<div class="statgrid">
     <div class="card"><b>${s.memories}</b><span>memories</span></div>
+    <div class="card"><b>${s.embedded}</b><span>embedded (semantic recall)</span></div>
     <div class="card"><b>${s.turns}</b><span>turns captured</span></div>
     <div class="card"><b>${s.sessions}</b><span>sessions</span></div>
     <div class="card"><b>${hitRate}</b><span>recall hit rate (${s.recall_calls} calls)</span></div>

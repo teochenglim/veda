@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/teochenglim/veda/internal/config"
+	"github.com/teochenglim/veda/internal/embed"
 	"github.com/teochenglim/veda/internal/llm"
 	"github.com/teochenglim/veda/internal/mcpserver"
 	"github.com/teochenglim/veda/internal/store"
@@ -188,7 +189,11 @@ func cmdServe(args []string) error {
 	if key := cfg.APIKey(); key != "" {
 		lc = llm.New(cfg.LLM.BaseURL, key, cfg.LLM.Model)
 	}
-	wk := &worker.Worker{Store: s, WAL: w, LLM: lc,
+	var em store.Embedder
+	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
+		em = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
+	}
+	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Embedder: em,
 		Interval: time.Duration(cfg.Worker.IntervalMinutes) * time.Minute, Batch: cfg.Worker.BatchSize}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -197,7 +202,7 @@ func cmdServe(args []string) error {
 		telemetry.StartFlusher(ctx, s, cfg.Telemetry.URL,
 			time.Duration(cfg.Telemetry.FlushHours)*time.Hour, cfg.Telemetry.InstallID, version)
 	}
-	return mcpserver.Run(s)
+	return mcpserver.Run(s, em)
 }
 
 // --- veda ui ----------------------------------------------------------------
@@ -249,7 +254,11 @@ func cmdWorker(args []string) error {
 	if key := cfg.APIKey(); key != "" {
 		lc = llm.New(cfg.LLM.BaseURL, key, cfg.LLM.Model)
 	}
-	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Batch: cfg.Worker.BatchSize}
+	var em store.Embedder
+	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
+		em = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
+	}
+	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Embedder: em, Batch: cfg.Worker.BatchSize}
 	return wk.RunOnce(context.Background())
 }
 

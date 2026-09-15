@@ -3,13 +3,16 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/teochenglim/veda/internal/embed"
 	_ "modernc.org/sqlite"
 )
 
@@ -95,6 +98,10 @@ CREATE TABLE IF NOT EXISTS pending_turns (
   id INTEGER PRIMARY KEY, session_id TEXT,
   role TEXT, content TEXT, ts INTEGER, gate_score REAL
 );
+CREATE TABLE IF NOT EXISTS memories_vec (
+  memory_id TEXT PRIMARY KEY, vec BLOB NOT NULL, dims INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_vec_memory ON memories_vec(memory_id);
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
   INSERT INTO memories_fts(rowid, content, type) VALUES (new.rowid, new.content, new.type);
 END;
@@ -122,6 +129,219 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	return s, nil
+}
+
+// Embedder produces one vector per input text. Implemented by the
+// OpenAI-compatible client in internal/embed; tests supply fakes.
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// SetEmbedding upserts the vector for a memory. v0.2 migration path: rows
+// are added lazily by the worker's backfill, so upgrading an existing
+// v0.1 database needs no schema migration beyond this table.
+func (s *Store) SetEmbedding(memoryID string, vec []float32) error {
+	b, err := json.Marshal(vec)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO memories_vec (memory_id, vec, dims) VALUES (?,?,?)
+		ON CONFLICT(memory_id) DO UPDATE SET vec = excluded.vec, dims = excluded.dims`,
+		memoryID, b, len(vec))
+	return err
+}
+
+// MissingEmbeddings returns live memories that have no vector yet — the
+// worker's backfill queue.
+func (s *Store) MissingEmbeddings(limit int) ([]*Memory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT `+memCols+` WHERE deleted = 0 AND (ttl = 0 OR ttl > ?)
+		AND id NOT IN (SELECT memory_id FROM memories_vec) ORDER BY updated_at DESC LIMIT ?`,
+		time.Now().Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectMemories(rows)
+}
+
+// CountEmbedded reports how many live memories carry a vector (Digest stat).
+func (s *Store) CountEmbedded() (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM memories_vec v
+		JOIN memories m ON m.id = v.memory_id WHERE m.deleted = 0`).Scan(&n)
+	return n, err
+}
+
+// vecRow is a live memory joined with its vector.
+type vecRow struct {
+	*Memory
+	vec []float32
+}
+
+func (s *Store) loadVectors() ([]*vecRow, error) {
+	rows, err := s.db.Query(`SELECT m.id, m.type, m.content, m.source_turn_ids, m.agent_id,
+		m.confidence, m.salience, m.created_at, m.updated_at, m.ttl, m.deleted, v.vec
+		FROM memories m JOIN memories_vec v ON v.memory_id = m.id
+		WHERE m.deleted = 0 AND (m.ttl = 0 OR m.ttl > ?) AND m.confidence >= 0`,
+		time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*vecRow
+	for rows.Next() {
+		var m Memory
+		var deleted int
+		var raw []byte
+		if err := rows.Scan(&m.ID, &m.Type, &m.Content, &m.SourceTurnIDs, &m.AgentID,
+			&m.Confidence, &m.Salience, &m.CreatedAt, &m.UpdatedAt, &m.TTL, &deleted, &raw); err != nil {
+			return nil, err
+		}
+		var vec []float32
+		if json.Unmarshal(raw, &vec) != nil || len(vec) == 0 {
+			continue
+		}
+		m.Deleted = deleted != 0
+		out = append(out, &vecRow{Memory: &m, vec: vec})
+	}
+	return out, rows.Err()
+}
+
+// RecallHybrid is v0.2's recall: weighted reciprocal-rank fusion of the FTS5
+// keyword path (weight 0.6) with embedding cosine similarity (weight 0.4).
+//
+// Degrades gracefully by design (AC3): a nil embedder, an embedding error,
+// or an empty vector table all fall back to keyword-only — never an error.
+// semanticOnly skips the fusion and returns the pure semantic ranking.
+func (s *Store) RecallHybrid(ctx context.Context, query string, limit int, minConfidence float64, em Embedder, semanticOnly bool) ([]*Memory, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	// Keyword pool: deeper than the final limit so fusion can re-rank.
+	pool := limit * 4
+	if pool < 20 {
+		pool = 20
+	}
+	fts, err := s.Recall(query, pool, minConfidence)
+	if err != nil {
+		return nil, err
+	}
+	if em == nil {
+		if len(fts) > limit {
+			fts = fts[:limit]
+		}
+		return fts, nil
+	}
+
+	qvec, err := s.embedQuery(ctx, em, query)
+	if err != nil {
+		if len(fts) > limit {
+			fts = fts[:limit]
+		}
+		return fts, nil // provider failure ⇒ keyword-only, never an error
+	}
+	rows, err := s.loadVectors()
+	if err != nil {
+		if len(fts) > limit {
+			fts = fts[:limit]
+		}
+		return fts, nil
+	}
+
+	type ranked struct {
+		m    *Memory
+		rank int
+	}
+	sims := make(map[string]float32, len(rows))
+	var sem []ranked
+	for _, r := range rows {
+		if r.Confidence < minConfidence {
+			continue
+		}
+		sims[r.ID] = embed.Cosine(qvec, r.vec)
+		sem = append(sem, ranked{m: r.Memory})
+	}
+	sort.SliceStable(sem, func(i, j int) bool {
+		return sims[sem[i].m.ID] > sims[sem[j].m.ID]
+	})
+	for i := range sem {
+		sem[i].rank = i
+	}
+
+	if semanticOnly {
+		if len(sem) == 0 {
+			if len(fts) > limit {
+				fts = fts[:limit]
+			}
+			return fts, nil // no vectors yet ⇒ keyword-only fallback
+		}
+		out := make([]*Memory, 0, limit)
+		for _, r := range sem {
+			if len(out) == limit {
+				break
+			}
+			out = append(out, r.m)
+		}
+		return out, nil
+	}
+
+	// Weighted RRF fusion. FTS carries the higher weight so an exact keyword
+	// match can never rank below a semantic-only neighbor (AC2).
+	const wFTS, wSem, k = 0.6, 0.4, 60.0
+	score := func(r int, w float64) float64 {
+		if r < 0 {
+			return 0
+		}
+		return w / (k + float64(r))
+	}
+	ftsRank := make(map[string]int, len(fts))
+	for i, m := range fts {
+		ftsRank[m.ID] = i
+	}
+	merged := make(map[string]*Memory)
+	type scored struct {
+		m     *Memory
+		score float64
+	}
+	var all []scored
+	for i, m := range fts {
+		s := score(i, wFTS) + score(-1, wSem)
+		merged[m.ID] = m
+		all = append(all, scored{m, s})
+	}
+	for _, r := range sem {
+		if _, ftsHit := ftsRank[r.m.ID]; ftsHit {
+			all[ftsRank[r.m.ID]].score += score(r.rank, wSem)
+			continue
+		}
+		if _, seen := merged[r.m.ID]; seen {
+			continue
+		}
+		merged[r.m.ID] = r.m
+		all = append(all, scored{r.m, score(-1, wFTS) + score(r.rank, wSem)})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].score > all[j].score })
+	out := make([]*Memory, 0, limit)
+	for _, sc := range all {
+		if len(out) == limit {
+			break
+		}
+		out = append(out, sc.m)
+	}
+	return out, nil
+}
+
+func (s *Store) embedQuery(ctx context.Context, em Embedder, query string) ([]float32, error) {
+	vecs, err := em.Embed(ctx, []string{query})
+	if err != nil {
+		return nil, err
+	}
+	if len(vecs) != 1 || len(vecs[0]) == 0 {
+		return nil, fmt.Errorf("embedder returned no query vector")
+	}
+	return vecs[0], nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -524,6 +744,7 @@ type Stats struct {
 	Arch        string `json:"arch"`
 	TS          int64  `json:"ts"`
 	Memories    int64  `json:"memories"`
+	Embedded    int64  `json:"embedded"`
 	Turns       int64  `json:"turns"`
 	Sessions    int64  `json:"sessions"`
 	RecallCalls int64  `json:"recall_calls"`
@@ -540,6 +761,7 @@ func (s *Store) CollectStats() (*Stats, error) {
 		dest *int64
 	}{
 		{`SELECT COUNT(*) FROM memories WHERE deleted = 0`, &st.Memories},
+		{`SELECT COUNT(*) FROM memories_vec v JOIN memories m ON m.id = v.memory_id WHERE m.deleted = 0`, &st.Embedded},
 		{`SELECT COUNT(*) FROM turns`, &st.Turns},
 		{`SELECT COUNT(*) FROM sessions`, &st.Sessions},
 		{`SELECT COUNT(*) FROM audit WHERE action = 'recall_hit'`, &st.RecallHits},

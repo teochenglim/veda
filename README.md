@@ -69,7 +69,7 @@ To identify which agent wrote a memory, give each one a name:
 | Tool | What it does |
 |---|---|
 | `remember(content, type?, ttl_seconds?)` | Save a durable fact or preference now |
-| `recall(query, limit?, min_confidence?)` | Full-text search over your memories |
+| `recall(query, limit?, min_confidence?, semantic?)` | Hybrid keyword+semantic search over your memories |
 | `list(type?, agent_id?, since?, until?)` | Browse memories |
 | `forget(id)` | Delete a memory (soft delete, audited) |
 | `export()` | Dump the whole store as JSON |
@@ -87,6 +87,30 @@ Four tabs:
 - **All** — every memory. Edit or delete inline.
 - **Audit** — who did what, when.
 - **Digest** — counts and recall hit rate.
+
+## Semantic recall (v0.2)
+
+Recall is hybrid by default: SQLite FTS5 keyword matching fused with
+embedding similarity (0.6 / 0.4 weighted rank fusion), so an exact keyword
+always keeps its top spot while paraphrases surface too. Agents can opt into
+pure semantic ranking with `recall(query, semantic: true)`.
+
+To enable it, point Veda at any OpenAI-compatible `/embeddings` endpoint —
+a local Ollama or LM Studio keeps everything on your machine:
+
+```toml
+# ~/.veda/config.toml
+[embed]
+enabled = true
+base_url = "http://localhost:11434/v1"   # Ollama default
+model = "nomic-embed-text"
+# api_key_env = "VEDA_EMBED_API_KEY"     # only for hosted providers
+```
+
+The worker backfills vectors for existing memories automatically — no
+migration, no re-import. If the embedding endpoint is down, recall quietly
+falls back to keyword-only. Nothing is ever sent anywhere except the URL you
+configure.
 
 ## Teach Veda about you (optional summarization)
 
@@ -148,12 +172,10 @@ veda version             Print the version
 
 ## What Veda does NOT do (yet)
 
-See the full plan in [ROADMAP.md](ROADMAP.md) — sync, semantic search, and
-conflict resolution are coming; everything hosted stays out of the local
-product.
+See the full plan in [ROADMAP.md](ROADMAP.md) — sync and conflict resolution
+are coming; everything hosted stays out of the local product.
 
 - Cross-device sync (planned v0.4, paid)
-- Vector / semantic search (v0.2)
 - Cross-agent conflict resolution (v0.3)
 - Anything hosted. Local only.
 
@@ -180,4 +202,7 @@ Design docs live in [DESIGN/](DESIGN/); per-release notes and plans in
 
 ## License
 
-MIT
+Apache 2.0 — commercial-friendly (explicit patent grant, permissive for
+commercial use and derivative products). Dual/commercial licensing of later
+paid features remains with the copyright holder; see [ROADMAP.md](ROADMAP.md)
+for the pricing plan.

@@ -10,6 +10,7 @@
 | TOML | `github.com/BurntSushi/toml` | the PRD names `config.toml` |
 | UI | stdlib `net/http` + embedded vanilla JS | zero build step, offline-capable, loopback-only |
 | LLM | raw `net/http` against OpenAI-compatible `/chat/completions` | one endpoint, any provider, no SDK lock-in |
+| Embeddings | raw `net/http` against OpenAI-compatible `/embeddings` (v0.2) | same shape as the LLM client; localhost-friendly for Ollama/LM Studio |
 
 No other runtime dependencies. `go.mod` stays intentionally small; new
 dependencies require a DESIGN note.

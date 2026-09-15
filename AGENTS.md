@@ -12,7 +12,8 @@ Docs: `prd.md` = requirements · `ROADMAP.md` = plan · `RELEASE/vX.Y.Z.md` = re
 ## Git & release caveat (important)
 
 - **The user does ALL git commits, pushes, tags, and releases manually. The agent never runs git commit/push/tag, `make bump`, or `make release`.**
-- The release command is `make release VERSION=0.1.0` (space + `VERSION=`, not `make release=0.1.0`).
+- The release command is `make release VERSION=x.y.z` (space + `VERSION=`, not `make release=x.y.z`).
+- When an implementation is finished, give a 1-line commit-message summary; the user runs the git commit and `make release` themselves.
 - `make release` amends the VERSION bump into HEAD and pushes `origin HEAD` — it fails unless the repo already has ≥1 commit AND an `origin` remote. User must commit first, add the remote, then run it.
 
 ## Rules

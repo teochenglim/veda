@@ -21,14 +21,16 @@ One local memory file. Every MCP agent reads and writes it.
 - [ ] Homebrew tap + install script *(weeks 8–9 of the launch plan)*
 - [ ] Launch: HN / X / r/LocalLLaMA / MCP Discord
 
-## v0.2.0 — Semantic recall 📋
+## v0.2.0 — Semantic recall ✅
 
-- [ ] Local embeddings + hybrid ranker (FTS5 bm25 ⊕ cosine)
-- [ ] `recall` gains `semantic: true`; exact-keyword behavior unchanged
-- [ ] Graceful degradation to keyword-only when the embedding provider fails
-- [ ] Eval scenario drafts from every recall failure reported at launch
+- [x] Vector search alongside FTS5 (embeddings via any OpenAI-compatible `/embeddings` endpoint; Ollama/LM Studio on localhost work unchanged)
+- [x] Hybrid ranker: weighted RRF, FTS5 bm25 (0.6) ⊕ cosine (0.4) — exact keyword matches keep their top spot
+- [x] `recall` gains `semantic: true`; default stays hybrid
+- [x] Graceful degradation to keyword-only when the embedding provider fails
+- [x] Lazy vector backfill by the worker — v0.1 databases upgrade with no migration
+- [ ] Eval scenario drafts from every recall failure reported at launch *(ongoing)*
 
-Details: [RELEASE/v0.2.0.md](RELEASE/v0.2.0.md)
+Details: [RELEASE/v0.2.0.md](RELEASE/v0.2.0.md) · design in [DESIGN/10](DESIGN/10_design_semantic_recall.md)
 
 ## v0.3.0 — Cross-agent conflict resolution 📋
 

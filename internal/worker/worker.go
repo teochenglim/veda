@@ -19,7 +19,8 @@ import (
 type Worker struct {
 	Store    *store.Store
 	WAL      *wal.WAL
-	LLM      *llm.Client // nil => drain+gate only, no summarization
+	LLM      *llm.Client    // nil => drain+gate only, no summarization
+	Embedder store.Embedder // nil => keyword-only recall; vectors backfilled when set
 	Interval time.Duration
 	Batch    int
 
@@ -52,10 +53,48 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if err := w.summarize(ctx); err != nil {
 		return err
 	}
+	if err := w.backfillVectors(ctx); err != nil {
+		log.Printf("veda worker: embed backfill: %v", err)
+	}
 	w.mu.Lock()
 	w.lastRun = time.Now()
 	w.mu.Unlock()
 	return nil
+}
+
+// backfillVectors embeds live memories that have no vector yet (v0.1→v0.2
+// migration and anything written since the last pass). Best-effort: an
+// embedder failure leaves the memories keyword-only until the next pass.
+func (w *Worker) backfillVectors(ctx context.Context) error {
+	if w.Embedder == nil {
+		return nil
+	}
+	const chunk = 32
+	for {
+		memories, err := w.Store.MissingEmbeddings(chunk)
+		if err != nil || len(memories) == 0 {
+			return err
+		}
+		texts := make([]string, len(memories))
+		for i, m := range memories {
+			texts[i] = m.Type + ": " + m.Content
+		}
+		vecs, err := w.Embedder.Embed(ctx, texts)
+		if err != nil {
+			return err
+		}
+		for i, m := range memories {
+			if i >= len(vecs) || len(vecs[i]) == 0 {
+				continue
+			}
+			if err := w.Store.SetEmbedding(m.ID, vecs[i]); err != nil {
+				return err
+			}
+		}
+		if len(memories) < chunk {
+			return nil
+		}
+	}
 }
 
 // summarize takes one batch of pending turns and promotes distilled facts to

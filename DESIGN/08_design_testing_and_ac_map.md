@@ -22,6 +22,13 @@ contract with the race detector and coverage.
 | AC9 | counts-only payload, flush, DELETE erasure | `internal/telemetry.TestAC9_*` (httptest endpoint asserts method + query) |
 | AC10 | export/import round trip, idempotent | `internal/store.TestAC10_ExportImportRoundTrip` |
 
+v0.2.0 adds a second block (see [RELEASE/v0.2.0.md](../RELEASE/v0.2.0.md)):
+semantic paraphrase recall (`store.TestAC1_SemanticParaphraseRecall`),
+exact-keyword stays top under hybrid fusion (`store.TestAC2_ExactKeywordStaysTop`),
+degradation on embedder failure (`store.TestAC3_...`,
+`worker.TestWorkerBackfillEmbedderFailureIsBestEffort`), and the single
+network destination of the embed client (`embed.TestAC4_SingleConfiguredDestination`).
+
 ## Techniques worth noting
 
 - **MCP over in-memory transports.** The SDK's `NewInMemoryTransports`
