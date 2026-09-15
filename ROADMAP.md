@@ -75,10 +75,14 @@ The moat. Every launch-post failure report becomes a fixture scenario.
 
 Details: [RELEASE/v0.6.0.md](RELEASE/v0.6.0.md) · design in [DESIGN/13](DESIGN/13_design_eval_harness.md)
 
-## v0.7.0 — Team compliance / audit export (paid) 💰
+## v0.7.0 — Team compliance / audit export (paid) 💰 ✅
 
-- [ ] Signed audit-log export for compliance regimes
-- [ ] Org memory policies (retention, redaction rules)
+- [x] Signed audit-log export: Ed25519 keygen, `veda audit export` signs the exact payload bytes, `veda audit verify` for reviewers — tampering fails loudly
+- [x] Org memory policies: `[policies]` retention (tombstoned + audited sweeps) and redaction (regex scrub on every write path), defaults off
+- [x] `veda policy status / enforce`
+- [ ] Org backend: managed policy configs + long-term export storage *(launch task, separate repo)*
+
+Details: [RELEASE/v0.7.0.md](RELEASE/v0.7.0.md) · design in [DESIGN/14](DESIGN/14_design_compliance.md)
 
 ## v1.0 — UOMP protocol 📋
 

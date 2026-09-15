@@ -204,6 +204,27 @@ out old ones?), and faithfulness (did distillation invent anything?).
 Exits non-zero on failure, so it drops straight into CI. Uploading
 anonymized aggregate scores for cross-install benchmarks is the paid tier.
 
+## Compliance: signed audit export + org policies (v0.7, paid tier)
+
+```sh
+veda audit keygen              # Ed25519 key pair (private key 0600)
+veda audit export -o audit.json  # the complete audit log, signed
+veda audit verify -f audit.json  # reviewer-side: SIGNATURE VALID / INVALID
+```
+
+Org house rules go in a `[policies]` config section (distribute it with
+your managed config):
+
+```toml
+[policies]
+retention_days = 365                     # auto-retire older memories
+redact = ["sk-[a-zA-Z0-9]{10,}"]         # scrubbed to "[redacted]" on write
+```
+
+Retention deletes are tombstoned (they sync) and audited per record;
+redaction applies to every new memory and captured turn. Off by default —
+no `[policies]` section means v0.6-identical behavior.
+
 ## Export / import — portable by design
 
 ```sh

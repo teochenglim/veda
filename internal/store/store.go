@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -68,7 +69,89 @@ type PendingTurn struct {
 
 // Store wraps the SQLite database.
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	redactors []*regexp.Regexp // v0.7 org policy: patterns scrubbed on write
+}
+
+// SetRedactors configures org redaction patterns applied to new memories
+// and turns before they are persisted.
+func (s *Store) SetRedactors(res []*regexp.Regexp) {
+	s.redactors = res
+}
+
+// redact applies the org patterns; returns the scrubbed text and whether
+// anything changed.
+func (s *Store) redact(content string) (string, bool) {
+	changed := false
+	for _, re := range s.redactors {
+		if re.MatchString(content) {
+			content = re.ReplaceAllString(content, "[redacted]")
+			changed = true
+		}
+	}
+	return content, changed
+}
+
+// CompileRedactors compiles org redaction patterns, rejecting bad regexes
+// with the offending pattern named.
+func CompileRedactors(patterns []string) ([]*regexp.Regexp, error) {
+	var out []*regexp.Regexp
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("policy redact pattern %q: %w", p, err)
+		}
+		out = append(out, re)
+	}
+	return out, nil
+}
+
+// EnforceRetention soft-deletes memories created before the cutoff,
+// recording a tombstone per row and a "retention" audit entry — org policy
+// deletes propagate via sync like user deletes. Returns the ids affected.
+func (s *Store) EnforceRetention(cutoff int64, actor string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM memories WHERE deleted = 0 AND status = 'active' AND created_at < ?`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	now := time.Now().Unix()
+	deviceID, _ := s.SyncGet("device_id")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if _, err := tx.Exec(`UPDATE memories SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0`, now, id); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(`INSERT INTO tombstones (memory_id, deleted_at, device_id) VALUES (?,?,?)
+			ON CONFLICT(memory_id) DO UPDATE SET deleted_at = MAX(deleted_at, excluded.deleted_at)`, id, now, deviceID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(`INSERT INTO audit (memory_id, action, actor, reason, ts) VALUES (?,?,?,?,?)`,
+			id, "retention", actor, fmt.Sprintf("older than retention cutoff %d", cutoff), now); err != nil {
+			return nil, err
+		}
+		if err := s.bumpChange(tx, id); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(`DELETE FROM memories_vec WHERE memory_id = ?`, id); err != nil {
+			return nil, err
+		}
+	}
+	return ids, tx.Commit()
 }
 
 const schema = `
@@ -441,6 +524,14 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Remember inserts a memory and writes an audit entry. It returns the new id.
 func (s *Store) Remember(m *Memory, actor string) (string, error) {
+	if len(s.redactors) > 0 {
+		if scrubbed, changed := s.redact(m.Content); changed {
+			m.Content = scrubbed
+			if !strings.Contains(m.Type, "redacted") {
+				m.Type = strings.TrimSpace(m.Type + " redacted")
+			}
+		}
+	}
 	now := time.Now().Unix()
 	if m.ID == "" {
 		m.ID = newID()
@@ -853,6 +944,9 @@ func (s *Store) InsertTurns(turns []Turn) error {
 	}
 	defer tx.Rollback()
 	for _, t := range turns {
+		if len(s.redactors) > 0 {
+			t.Content, _ = s.redact(t.Content)
+		}
 		if _, err := tx.Exec(`INSERT INTO turns (session_id, role, content, ts) VALUES (?,?,?,?)`,
 			t.SessionID, t.Role, t.Content, t.TS); err != nil {
 			return err

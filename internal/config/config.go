@@ -21,6 +21,35 @@ type Config struct {
 	UI        UIConfig        `toml:"ui"`
 	Telemetry TelemetryConfig `toml:"telemetry"`
 	Sync      SyncConfig      `toml:"sync"`
+	// Policies is a pointer: nil (the default) keeps the generated
+	// config.toml free of an empty [policies] table that users would
+	// otherwise duplicate when adding their org's section.
+	Policies *PoliciesConfig `toml:"policies,omitempty"`
+}
+
+// PoliciesConfig is v0.7 org policy: retention + redaction. All defaults
+// are off — a config without a [policies] section behaves exactly like
+// v0.6. Orgs distribute this section with their managed config.
+type PoliciesConfig struct {
+	// RetentionDays > 0 soft-deletes memories older than N days (enforced
+	// at serve/worker start and `veda policy enforce`).
+	RetentionDays int `toml:"retention_days,omitempty"`
+	// Redact holds regex patterns replaced with "[redacted]" in every new
+	// memory and captured turn.
+	Redact []string `toml:"redact,omitempty"`
+}
+
+// HasPolicies reports whether any org policy is configured.
+func (c *Config) HasPolicies() bool {
+	return c.Policies != nil && (c.Policies.RetentionDays > 0 || len(c.Policies.Redact) > 0)
+}
+
+// PoliciesOrZero returns the org policies, or the zero value when absent.
+func (c *Config) PoliciesOrZero() PoliciesConfig {
+	if c.Policies == nil {
+		return PoliciesConfig{}
+	}
+	return *c.Policies
 }
 
 type LLMConfig struct {

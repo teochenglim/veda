@@ -7,16 +7,19 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/teochenglim/veda/internal/audit"
 	"github.com/teochenglim/veda/internal/config"
 	"github.com/teochenglim/veda/internal/embed"
 	"github.com/teochenglim/veda/internal/eval"
@@ -60,6 +63,10 @@ func main() {
 		err = cmdSync(rest)
 	case "eval":
 		err = cmdEval(rest)
+	case "audit":
+		err = cmdAudit(rest)
+	case "policy":
+		err = cmdPolicy(rest)
 	case "version", "--version", "-v":
 		fmt.Println("veda " + version)
 	case "help", "--help", "-h":
@@ -88,6 +95,8 @@ Usage:
   veda telemetry status|disable|preview|export|forget   Manage anonymous stats (default: off)
   veda sync status|push|pull         Cross-device sync (paid tier, default: off)
   veda eval -f suite.json            Score recall scenarios against a throwaway store
+  veda audit keygen|export|verify    Signed audit-log export (compliance)
+  veda policy status|enforce         Org retention + redaction policies
   veda version                       Print the version
 
 Learn more: README.md
@@ -187,7 +196,10 @@ func cmdServe(args []string) error {
 
 	// The pipeline runs alongside the MCP server so captured turns are
 	// drained and summarized without blocking tool responses.
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config.toml is invalid: %w — fix or delete it in %s", err, config.Home())
+	}
 	w, err := wal.Open(config.WALPath(), 1024)
 	if err != nil {
 		return err
@@ -200,6 +212,11 @@ func cmdServe(args []string) error {
 	var em store.Embedder
 	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
 		em = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
+	}
+	if n, err := applyPolicies(s, cfg.Policies); err != nil {
+		return err
+	} else if n > 0 {
+		fmt.Printf("veda: retention policy retired %d memories\n", n)
 	}
 	collector := telemetry.NewCollector()
 	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Embedder: em,
@@ -228,6 +245,149 @@ func cmdServe(args []string) error {
 	return err
 }
 
+// applyPolicies wires v0.7 org policies into a store: redaction patterns
+// on write paths and a retention sweep. Returns the number of retention
+// deletions (0 when no retention policy is set).
+func applyPolicies(s *store.Store, cfg *config.PoliciesConfig) (int, error) {
+	if cfg == nil {
+		return 0, nil
+	}
+	if len(cfg.Redact) > 0 {
+		res, err := store.CompileRedactors(cfg.Redact)
+		if err != nil {
+			return 0, err
+		}
+		s.SetRedactors(res)
+	}
+	if cfg.RetentionDays > 0 {
+		cutoff := time.Now().AddDate(0, 0, -cfg.RetentionDays).Unix()
+		ids, err := s.EnforceRetention(cutoff, "policy")
+		if err != nil {
+			return 0, err
+		}
+		return len(ids), nil
+	}
+	return 0, nil
+}
+
+// --- veda audit ----------------------------------------------------------------
+
+func cmdAudit(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: veda audit <keygen|export|verify> [flags]")
+	}
+	keyPath := filepath.Join(config.Home(), "audit_signing_key")
+	switch args[0] {
+	case "keygen":
+		fs := flag.NewFlagSet("keygen", flag.ExitOnError)
+		out := fs.String("o", keyPath, "private key output path")
+		fs.Parse(args[1:])
+		kp, err := audit.Generate()
+		if err != nil {
+			return err
+		}
+		if err := audit.SavePrivate(*out, kp.Private); err != nil {
+			return err
+		}
+		fmt.Printf("private key: %s (0600 — keep it secret, back it up)\n", *out)
+		fmt.Printf("public key:  %s\n", hex.EncodeToString(kp.Public))
+		return nil
+	case "export":
+		fs := flag.NewFlagSet("export", flag.ExitOnError)
+		out := fs.String("o", "", "output file (default stdout)")
+		key := fs.String("key", keyPath, "signing key path")
+		fs.Parse(args[1:])
+		priv, err := audit.LoadPrivate(*key)
+		if err != nil {
+			return fmt.Errorf("no signing key: %w — run `veda audit keygen` first", err)
+		}
+		s, err := openStore()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("config.toml is invalid: %w — fix or delete it in %s", err, config.Home())
+		}
+		data, err := audit.BuildExport(s, cfg.Telemetry.InstallID, priv, time.Now())
+		if err != nil {
+			return err
+		}
+		if *out == "" {
+			os.Stdout.Write(data)
+			fmt.Println()
+			return nil
+		}
+		return os.WriteFile(*out, data, 0o600)
+	case "verify":
+		fs := flag.NewFlagSet("verify", flag.ExitOnError)
+		in := fs.String("f", "", "signed export file (required)")
+		fs.Parse(args[1:])
+		if *in == "" {
+			return fmt.Errorf("usage: veda audit verify -f <file>")
+		}
+		data, err := os.ReadFile(*in)
+		if err != nil {
+			return err
+		}
+		p, err := audit.VerifyExport(data)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("SIGNATURE VALID — %d audit entries, exported %s (install %s)\n",
+			len(p.Entries), time.Unix(p.ExportedAt, 0).Format(time.RFC3339), p.InstallID)
+		return nil
+	default:
+		return fmt.Errorf("unknown audit command %q", args[0])
+	}
+}
+
+// --- veda policy ----------------------------------------------------------------
+
+func cmdPolicy(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: veda policy <status|enforce>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	pol := cfg.PoliciesOrZero()
+	switch args[0] {
+	case "status":
+		fmt.Printf("retention_days: %d\n", pol.RetentionDays)
+		if len(pol.Redact) == 0 {
+			fmt.Println("redact:         (none)")
+		} else {
+			fmt.Println("redact:")
+			for _, r := range pol.Redact {
+				fmt.Printf("  - %s\n", r)
+			}
+		}
+		if pol.RetentionDays == 0 && len(pol.Redact) == 0 {
+			fmt.Println("\nNo org policies configured (defaults). Add a [policies] section to config.toml.")
+		}
+		return nil
+	case "enforce":
+		n, err := applyPolicies(s, cfg.Policies)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("policy enforce: %d memories retired by retention\n", n)
+		return nil
+	default:
+		return fmt.Errorf("unknown policy command %q", args[0])
+	}
+}
+
+// --- veda sync ----------------------------------------------------------------
+
 func syncEngine(s *store.Store, cfg *config.Config) *syncengine.Engine {
 	return &syncengine.Engine{Store: s, Cfg: cfg.Sync}
 }
@@ -253,7 +413,10 @@ func cmdEval(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config.toml is invalid: %w — fix or delete it in %s", err, config.Home())
+	}
 	opts := eval.Options{}
 	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
 		opts.Embedder = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
@@ -390,7 +553,10 @@ func cmdUI(args []string) error {
 		return err
 	}
 	defer s.Close()
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config.toml is invalid: %w — fix or delete it in %s", err, config.Home())
+	}
 	addr := *bind
 	if addr == "" {
 		addr = cfg.UI.Bind
@@ -419,7 +585,10 @@ func cmdWorker(args []string) error {
 		return err
 	}
 	defer s.Close()
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config.toml is invalid: %w — fix or delete it in %s", err, config.Home())
+	}
 	w, err := wal.Open(config.WALPath(), 16)
 	if err != nil {
 		return err
@@ -432,6 +601,9 @@ func cmdWorker(args []string) error {
 	var em store.Embedder
 	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
 		em = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
+	}
+	if _, err := applyPolicies(s, cfg.Policies); err != nil {
+		return err
 	}
 	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Embedder: em, Batch: cfg.Worker.BatchSize}
 	return wk.RunOnce(context.Background())
