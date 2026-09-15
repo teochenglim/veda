@@ -1,0 +1,138 @@
+package ui
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/teochenglim/veda/internal/store"
+)
+
+func uiTest(t *testing.T) (*httptest.Server, *store.Store) {
+	t.Helper()
+	s, err := store.Open(t.TempDir() + "/veda.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	sv := &Server{Store: s}
+	ts := httptest.NewServer(sv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, s
+}
+
+func get(t *testing.T, url string, out any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s: %d", url, resp.StatusCode)
+	}
+	if out != nil {
+		json.NewDecoder(resp.Body).Decode(out)
+	}
+}
+
+func post(t *testing.T, url string, body any, want int) map[string]any {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != want {
+		t.Fatalf("POST %s: got %d want %d", url, resp.StatusCode, want)
+	}
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+	return m
+}
+
+// AC7: the review UI serves the four tabs' data: Pending, All, Audit,
+// Digest — and supports approve / edit / delete from the browser.
+func TestAC7_ReviewUITabsAndActions(t *testing.T) {
+	ts, s := uiTest(t)
+
+	// seed: one memory, one pending candidate, one audit entry
+	id, _ := s.Remember(&store.Memory{Content: "User runs marathons", Type: "fact"}, "mcp")
+	s.InsertPending([]store.PendingTurn{{SessionID: "s", Role: "user", Content: "I prefer morning runs before 7am", GateScore: 0.5}})
+
+	// index page (the SPA with the four tabs)
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	for _, tab := range []string{"Pending", "All", "Audit", "Digest"} {
+		if !strings.Contains(buf.String(), tab) {
+			t.Errorf("index page missing tab %q", tab)
+		}
+	}
+
+	// Pending tab data
+	var pending []*store.PendingTurn
+	get(t, ts.URL+"/api/pending", &pending)
+	if len(pending) != 1 {
+		t.Fatalf("pending tab: %d", len(pending))
+	}
+
+	// approve a pending turn (with human-edited text)
+	post(t, ts.URL+"/api/pending/approve", map[string]any{
+		"id": pending[0].ID, "content": "User prefers morning runs before 7am",
+	}, 200)
+	var mems []*store.Memory
+	get(t, ts.URL+"/api/memories", &mems)
+	if len(mems) != 2 {
+		t.Fatalf("approve must create a memory, have %d", len(mems))
+	}
+
+	// All tab: edit a memory
+	post(t, ts.URL+"/api/memories/update", map[string]any{"id": id, "content": "User runs ultramarathons"}, 200)
+	var after []*store.Memory
+	get(t, ts.URL+"/api/memories", &after)
+	for _, m := range after {
+		if m.ID == id && m.Content != "User runs ultramarathons" {
+			t.Fatal("edit did not stick")
+		}
+	}
+
+	// delete from the All tab
+	post(t, ts.URL+"/api/memories/delete", map[string]any{"id": id}, 200)
+	get(t, ts.URL+"/api/memories", &after)
+	if len(after) != 1 {
+		t.Fatalf("delete must remove from All, have %d", len(after))
+	}
+
+	// Audit tab reflects everything
+	var audit []*store.AuditEntry
+	get(t, ts.URL+"/api/audit", &audit)
+	if len(audit) < 3 {
+		t.Fatalf("audit must show create/update/forget, have %d entries", len(audit))
+	}
+
+	// Digest tab: counts only
+	var digest map[string]any
+	get(t, ts.URL+"/api/digest", &digest)
+	if digest["memories"].(float64) != 1 {
+		t.Fatalf("digest wrong: %v", digest)
+	}
+
+	// reject path
+	s.InsertPending([]store.PendingTurn{{Role: "user", Content: "junk candidate"}})
+	var pend2 []*store.PendingTurn
+	get(t, ts.URL+"/api/pending", &pend2)
+	post(t, ts.URL+"/api/pending/reject", map[string]any{"id": pend2[0].ID}, 200)
+	get(t, ts.URL+"/api/pending", &pend2)
+	if len(pend2) != 0 {
+		t.Fatal("reject must discard the candidate")
+	}
+}

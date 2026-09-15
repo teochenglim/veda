@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veda — your memory</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1e26; --fg:#e6e9ef; --dim:#8b93a3; --accent:#7aa2f7; --danger:#f7768e; --ok:#9ece6a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px 24px; border-bottom:1px solid #232833; display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size:18px; margin:0; }
+  header span { color:var(--dim); font-size:13px; }
+  nav { display:flex; gap:4px; padding:0 24px; border-bottom:1px solid #232833; }
+  nav button { background:none; border:none; color:var(--dim); padding:10px 14px; font-size:14px; cursor:pointer; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  main { padding:24px; max-width:900px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid #232833; border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+  .card .meta { color:var(--dim); font-size:12px; margin-bottom:4px; display:flex; gap:8px; flex-wrap:wrap; }
+  .tag { background:#242a36; border-radius:4px; padding:1px 6px; }
+  .content { white-space:pre-wrap; word-break:break-word; }
+  .row { display:flex; gap:8px; margin-top:10px; }
+  textarea { width:100%; background:#12151c; color:var(--fg); border:1px solid #2a3140; border-radius:6px; padding:8px; font:inherit; }
+  button.act { background:#242a36; color:var(--fg); border:1px solid #2a3140; border-radius:6px; padding:5px 12px; cursor:pointer; }
+  button.act:hover { border-color:var(--accent); }
+  button.danger { color:var(--danger); }
+  .empty { color:var(--dim); text-align:center; padding:40px 0; }
+  .statgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; }
+  .statgrid .card { margin:0; }
+  .statgrid b { font-size:24px; display:block; }
+  .statgrid span { color:var(--dim); font-size:12px; }
+</style>
+</head>
+<body>
+<header><h1>Veda</h1><span>the knowledge of you, owned by you</span></header>
+<nav>
+  <button data-tab="pending" class="active">Pending</button>
+  <button data-tab="all">All</button>
+  <button data-tab="audit">Audit</button>
+  <button data-tab="digest">Digest</button>
+</nav>
+<main id="main"></main>
+<script>
+const main = document.getElementById('main');
+let tab = 'pending';
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function post(path, body) {
+  return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+}
+const esc = s => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
+
+async function load() {
+  main.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    if (tab === 'pending') await renderPending();
+    else if (tab === 'all') await renderAll();
+    else if (tab === 'audit') await renderAudit();
+    else await renderDigest();
+  } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function renderPending() {
+  const items = await api('/api/pending');
+  if (!items.length) { main.innerHTML = '<div class="empty">Nothing pending. Veda is all caught up.</div>'; return; }
+  main.innerHTML = items.map(p => `
+    <div class="card">
+      <div class="meta"><span class="tag">${esc(p.role)}</span><span>score ${p.gate_score.toFixed(2)}</span><span>#${p.id}</span></div>
+      <div class="content">${esc(p.content)}</div>
+      <div class="row">
+        <textarea rows="2" id="edit-${p.id}">${esc(p.content)}</textarea>
+      </div>
+      <div class="row">
+        <button class="act" onclick="approve(${p.id})">Approve as memory</button>
+        <button class="act danger" onclick="reject(${p.id})">Discard</button>
+      </div>
+    </div>`).join('');
+}
+window.approve = async id => {
+  await post('/api/pending/approve', {id, content: document.getElementById('edit-'+id).value});
+  load();
+};
+window.reject = async id => { await post('/api/pending/reject', {id}); load(); };
+
+async function renderAll() {
+  const mems = await api('/api/memories');
+  if (!mems.length) { main.innerHTML = '<div class="empty">No memories yet. Agents add them via the <code>remember</code> tool.</div>'; return; }
+  main.innerHTML = mems.map(m => `
+    <div class="card">
+      <div class="meta">
+        <span class="tag">${esc(m.type || 'fact')}</span>
+        <span>confidence ${m.confidence.toFixed(2)}</span>
+        <span>${esc(m.agent_id || '')}</span>
+        <span>${new Date(m.created_at * 1000).toLocaleString()}</span>
+        <span>${esc(m.id)}</span>
+      </div>
+      <div class="content" id="c-${esc(m.id)}">${esc(m.content)}</div>
+      <div class="row">
+        <button class="act" onclick="startEdit('${esc(m.id)}')">Edit</button>
+        <button class="act danger" onclick="del('${esc(m.id)}')">Delete</button>
+      </div>
+    </div>`).join('');
+}
+window.startEdit = id => {
+  const el = document.getElementById('c-'+id);
+  const cur = el.textContent;
+  el.outerHTML = `<textarea rows="3" id="c-${id}">${esc(cur)}</textarea>
+    <div class="row"><button class="act" onclick="saveEdit('${id}')">Save</button></div>`;
+};
+window.saveEdit = async id => {
+  await post('/api/memories/update', {id, content: document.getElementById('c-'+id).value});
+  load();
+};
+window.del = async id => {
+  if (!confirm('Delete this memory? The deletion is recorded in the audit log.')) return;
+  await post('/api/memories/delete', {id});
+  load();
+};
+
+async function renderAudit() {
+  const entries = await api('/api/audit');
+  if (!entries.length) { main.innerHTML = '<div class="empty">No audit entries yet.</div>'; return; }
+  main.innerHTML = entries.map(a => `
+    <div class="card">
+      <div class="meta"><span class="tag">${esc(a.action)}</span><span>${esc(a.actor)}</span>
+      <span>${a.memory_id ? esc(a.memory_id) : ''}</span><span>${new Date(a.ts * 1000).toLocaleString()}</span></div>
+      <div class="content">${esc(a.reason || '')}</div>
+    </div>`).join('');
+}
+
+async function renderDigest() {
+  const s = await api('/api/digest');
+  const hitRate = s.recall_calls > 0 ? (100 * s.recall_hits / s.recall_calls).toFixed(1) + '%' : '—';
+  main.innerHTML = `<div class="statgrid">
+    <div class="card"><b>${s.memories}</b><span>memories</span></div>
+    <div class="card"><b>${s.turns}</b><span>turns captured</span></div>
+    <div class="card"><b>${s.sessions}</b><span>sessions</span></div>
+    <div class="card"><b>${hitRate}</b><span>recall hit rate (${s.recall_calls} calls)</span></div>
+    <div class="card"><b>${s.forget_count}</b><span>memories forgotten</span></div>
+  </div>`;
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+  load();
+});
+load();
+</script>
+</body>
+</html>
