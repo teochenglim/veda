@@ -51,7 +51,18 @@ Details: [RELEASE/v0.3.0.md](RELEASE/v0.3.0.md) · design in [DESIGN/11](DESIGN/
 
 Details: [RELEASE/v0.4.0.md](RELEASE/v0.4.0.md) · design in [DESIGN/12](DESIGN/12_design_hosted_sync.md)
 
-## v0.5.0 — Advanced eval harness (paid) 💰
+## v0.5.0 — Telemetry you can audit ✅
+
+Same single opt-in consent, same counts-and-enums-only guarantee — more signal.
+
+- [x] `ext` block in telemetry payloads: agent/clients (from MCP `clientInfo`), feature flags, `embed_provider` enum, gate economics, UI adoption, allowlisted error counts
+- [x] Transparency: `veda telemetry preview/export` include exactly what would be sent
+- [x] Sanitization enforced in one place — no URL/path/locale/free-text can ever enter the payload
+- [x] Server contract unchanged (`prd.cloudflare.md`); old workers ignore `ext`
+
+Details: [RELEASE/v0.5.0.md](RELEASE/v0.5.0.md)
+
+## v0.6.0 — Advanced eval harness (paid) 💰
 
 The moat. Cross-install recall benchmarks, interference detection,
 faithfulness scoring of distilled memories.
@@ -60,7 +71,9 @@ faithfulness scoring of distilled memories.
 - [ ] `veda eval` runs a suite against any config and scores it
 - [ ] Paid tier: cross-install benchmarks, interference detection
 
-## v0.6.0 — Team compliance / audit export (paid) 💰
+Details: [RELEASE/v0.6.0.md](RELEASE/v0.6.0.md)
+
+## v0.7.0 — Team compliance / audit export (paid) 💰
 
 - [ ] Signed audit-log export for compliance regimes
 - [ ] Org memory policies (retention, redaction rules)

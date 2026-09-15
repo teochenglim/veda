@@ -20,7 +20,11 @@ memories · turns · sessions · recall_calls · recall_hits · forget_count
 ```
 
 There is no free-text field, no path, no timestamp granularity beyond the
-flush moment. A regression test asserts that memory content never appears in
+flush moment. Since v0.5 the payload may carry an `ext` block (agent/clients
+from MCP `clientInfo`, feature flags, `embed_provider` as a fixed enum,
+gate/UI/error counters) — every string passes `sanitizeName`/`sanitizeErrorCode`
+or the provider enum in `internal/telemetry/ext.go`; no API exists to set
+free text, so URLs and paths cannot enter the payload even by accident. A regression test asserts that memory content never appears in
 a serialized payload, and the store layer has no API that could leak one
 (`CollectStats` returns counts).
 

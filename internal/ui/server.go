@@ -20,13 +20,14 @@ var staticFS embed.FS
 
 // Server wires HTTP handlers to the store.
 type Server struct {
-	Store *store.Store
+	Store  *store.Store
+	OnOpen func() // v0.5 telemetry hook: counts review-UI loads
 }
 
 func (sv *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	sub, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+	mux.Handle("GET /", sv.countOpen(http.FileServer(http.FS(sub))))
 	mux.HandleFunc("GET /api/pending", sv.handlePending)
 	mux.HandleFunc("POST /api/pending/approve", sv.handleApprove)
 	mux.HandleFunc("POST /api/pending/reject", sv.handleReject)
@@ -42,6 +43,15 @@ func (sv *Server) routes() *http.ServeMux {
 
 // Handler returns the UI's http.Handler (also used by tests).
 func (sv *Server) Handler() http.Handler { return sv.routes() }
+
+func (sv *Server) countOpen(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if sv.OnOpen != nil && r.URL.Path == "/" {
+			sv.OnOpen()
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

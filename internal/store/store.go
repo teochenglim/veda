@@ -1221,6 +1221,10 @@ type Stats struct {
 	RecallCalls int64  `json:"recall_calls"`
 	RecallHits  int64  `json:"recall_hits"`
 	ForgetCount int64  `json:"forget_count"`
+
+	// Ext is the v0.5 opt-in audit block (counts/enums only); rendered by
+	// the telemetry package, never populated by the store.
+	Ext any `json:"ext,omitempty"`
 }
 
 // CollectStats computes anonymous counts from the DB.

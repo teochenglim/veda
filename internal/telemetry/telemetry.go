@@ -21,8 +21,9 @@ import (
 )
 
 // Preview returns the exact payload that would be sent on the next flush,
-// without sending anything and without requiring consent.
-func Preview(s *store.Store, installID, version string) (string, error) {
+// without sending anything and without requiring consent. ext may be nil
+// (renders as a v0.4-shaped payload).
+func Preview(s *store.Store, installID, version string, ext *Ext) (string, error) {
 	st, err := s.CollectStats()
 	if err != nil {
 		return "", err
@@ -31,6 +32,12 @@ func Preview(s *store.Store, installID, version string) (string, error) {
 	st.Version = version
 	st.OS = osName()
 	st.Arch = archName()
+	if ext == nil {
+		ext = LoadExt(s) // persisted snapshot from the last serve session
+	}
+	if ext != nil {
+		st.Ext = ext
+	}
 	b, err := jsonMarshalIndent(st)
 	if err != nil {
 		return "", err
@@ -38,10 +45,38 @@ func Preview(s *store.Store, installID, version string) (string, error) {
 	return string(b), nil
 }
 
+// PersistExt stores an ext snapshot in sync_state so `veda telemetry
+// preview/export` (separate processes) can show exactly what a serve
+// session has been collecting. The snapshot is counts and enums only —
+// same privacy envelope as the payload itself.
+func PersistExt(s *store.Store, ext *Ext) error {
+	if ext == nil {
+		return nil
+	}
+	b, err := jsonMarshal(ext)
+	if err != nil {
+		return err
+	}
+	return s.SyncSet("telemetry_ext", string(b))
+}
+
+// LoadExt reads the persisted ext snapshot, nil when none exists.
+func LoadExt(s *store.Store) *Ext {
+	v, err := s.SyncGet("telemetry_ext")
+	if err != nil || v == "" {
+		return nil
+	}
+	var ext Ext
+	if jsonUnmarshal(v, &ext) != nil {
+		return nil
+	}
+	return &ext
+}
+
 // QueueNow snapshots stats and stores the payload in the telemetry_queue
 // table, ready for the next flush. Called by the serve loop.
-func QueueNow(s *store.Store, installID, version string) error {
-	payload, err := Preview(s, installID, version)
+func QueueNow(s *store.Store, installID, version string, ext *Ext) error {
+	payload, err := Preview(s, installID, version, ext)
 	if err != nil {
 		return err
 	}
@@ -97,10 +132,10 @@ func Delete(ctx context.Context, endpoint, installID string) error {
 	return nil
 }
 
-// StartFlusher queues a payload every interval/2 and flushes every interval
-// (default 24h) while `veda serve` runs. It does nothing when telemetry is
-// disabled — the normal case.
-func StartFlusher(ctx context.Context, s *store.Store, endpoint string, interval time.Duration, installID, version string) {
+// StartFlusher queues a payload every interval and flushes while
+// `veda serve` runs. It does nothing when telemetry is disabled — the
+// normal case. extProvider (nil-safe) captures the ext block at queue time.
+func StartFlusher(ctx context.Context, s *store.Store, endpoint string, interval time.Duration, installID, version string, extProvider func() *Ext) {
 	if endpoint == "" {
 		return
 	}
@@ -110,7 +145,11 @@ func StartFlusher(ctx context.Context, s *store.Store, endpoint string, interval
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
-				if err := QueueNow(s, installID, version); err != nil {
+				var ext *Ext
+				if extProvider != nil {
+					ext = extProvider()
+				}
+				if err := QueueNow(s, installID, version, ext); err != nil {
 					log.Printf("veda telemetry: queue: %v", err)
 					continue
 				}

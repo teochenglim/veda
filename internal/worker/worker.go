@@ -24,8 +24,24 @@ type Worker struct {
 	Interval time.Duration
 	Batch    int
 
+	// v0.5 telemetry hooks (nil-safe): gate rejections and allowlisted errors.
+	OnGateRejected func(n int64)
+	OnError        func(code string)
+
 	mu      sync.Mutex
 	lastRun time.Time
+}
+
+func (w *Worker) err(code string) {
+	if w.OnError != nil {
+		w.OnError(code)
+	}
+}
+
+func (w *Worker) gateRejected(n int64) {
+	if w.OnGateRejected != nil {
+		w.OnGateRejected(n)
+	}
 }
 
 // RunOnce performs one full pass. It is safe to call concurrently with the
@@ -33,20 +49,25 @@ type Worker struct {
 func (w *Worker) RunOnce(ctx context.Context) error {
 	turns, err := w.WAL.Drain()
 	if err != nil {
+		w.err("wal_fail")
 		return err
 	}
 	if err := w.Store.InsertTurns(turns); err != nil {
 		return err
 	}
 	var pending []store.PendingTurn
+	gated := int64(0)
 	for _, t := range turns {
 		if r := gate.Check(t.Role, t.Content); r.Candidate {
 			pending = append(pending, store.PendingTurn{
 				SessionID: t.SessionID, Role: t.Role, Content: t.Content,
 				TS: t.TS, GateScore: r.Score,
 			})
+		} else {
+			gated++
 		}
 	}
+	w.gateRejected(gated)
 	if err := w.Store.InsertPending(pending); err != nil {
 		return err
 	}
@@ -81,6 +102,7 @@ func (w *Worker) backfillVectors(ctx context.Context) error {
 		}
 		vecs, err := w.Embedder.Embed(ctx, texts)
 		if err != nil {
+			w.err("embed_fail")
 			return err
 		}
 		for i, m := range memories {
@@ -121,6 +143,7 @@ func (w *Worker) summarize(ctx context.Context) error {
 	}
 	facts, err := w.LLM.Distill(ctx, texts)
 	if err != nil {
+		w.err("llm_fail")
 		// Put the batch back so nothing is lost; worker retries next tick.
 		var retry []store.PendingTurn
 		for _, t := range turns {

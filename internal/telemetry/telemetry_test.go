@@ -32,7 +32,7 @@ func TestAC9_PreviewNoContentAndFlush(t *testing.T) {
 	s.Remember(&store.Memory{Content: "my SECRET memory content about coffee"}, "mcp")
 	s.RecordRecall(true)
 
-	payload, err := Preview(s, "install-abc", "v0.1.0")
+	payload, err := Preview(s, "install-abc", "v0.1.0", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestAC9_PreviewNoContentAndFlush(t *testing.T) {
 		t.Fatalf("preview payload wrong: %v", st)
 	}
 
-	if err := QueueNow(s, "install-abc", "v0.1.0"); err != nil {
+	if err := QueueNow(s, "install-abc", "v0.1.0", nil); err != nil {
 		t.Fatal(err)
 	}
 	var bodies []string

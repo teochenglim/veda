@@ -194,8 +194,9 @@ veda telemetry export     # your pseudonymous install id + anything queued
 veda telemetry forget     # ask the endpoint to erase your install id (GDPR)
 ```
 
-What is sent (only if you ever opt in): counts, recall hit rate, error codes,
-OS/arch, a random install id. What is **never** sent: your memories,
+What is sent (only if you ever opt in): counts, recall hit rate, allowlisted
+error codes, adoption flags (semantic/sync on?, embed provider as a fixed
+enum, which MCP clients use Veda), OS/arch, a random install id. What is **never** sent: your memories,
 conversations, API keys, or identity. The optional ingest endpoint is a tiny
 Cloudflare Worker deployed from its own repo — contract in
 [prd.cloudflare.md](prd.cloudflare.md).

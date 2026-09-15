@@ -197,19 +197,31 @@ func cmdServe(args []string) error {
 	if cfg.Embed.Enabled && cfg.Embed.BaseURL != "" {
 		em = embed.New(cfg.Embed.BaseURL, cfg.EmbedAPIKey(), cfg.Embed.Model)
 	}
+	collector := telemetry.NewCollector()
 	wk := &worker.Worker{Store: s, WAL: w, LLM: lc, Embedder: em,
-		Interval: time.Duration(cfg.Worker.IntervalMinutes) * time.Minute, Batch: cfg.Worker.BatchSize}
+		Interval: time.Duration(cfg.Worker.IntervalMinutes) * time.Minute, Batch: cfg.Worker.BatchSize,
+		OnGateRejected: collector.AddGateRejected, OnError: collector.RecordError}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go wk.Run(ctx)
 	if cfg.Telemetry.Enabled && cfg.Telemetry.URL != "" {
 		telemetry.StartFlusher(ctx, s, cfg.Telemetry.URL,
-			time.Duration(cfg.Telemetry.FlushHours)*time.Hour, cfg.Telemetry.InstallID, version)
+			time.Duration(cfg.Telemetry.FlushHours)*time.Hour, cfg.Telemetry.InstallID, version,
+			func() *telemetry.Ext {
+				return collector.Snapshot(config.DBPath(), em != nil, cfg.Sync.Enabled, telemetry.ProviderFromURL(cfg.Embed.BaseURL))
+			})
 	}
 	if cfg.Sync.Enabled && cfg.Sync.URL != "" {
 		syncEngine(s, cfg).RunBackgroundLoop(ctx)
 	}
-	return mcpserver.Run(s, em)
+	err = mcpserver.Run(s, em, collector.AddClient)
+	if cfg.Telemetry.Enabled {
+		// persist the session's ext snapshot so `telemetry preview/export`
+		// (other processes) can show exactly what this session collected
+		ext := collector.Snapshot(config.DBPath(), em != nil, cfg.Sync.Enabled, telemetry.ProviderFromURL(cfg.Embed.BaseURL))
+		_ = telemetry.PersistExt(s, ext)
+	}
+	return err
 }
 
 func syncEngine(s *store.Store, cfg *config.Config) *syncengine.Engine {
@@ -294,7 +306,8 @@ func cmdUI(args []string) error {
 	if addr == "" {
 		addr = cfg.UI.Bind
 	}
-	sv := &ui.Server{Store: s}
+	collector := telemetry.NewCollector()
+	sv := &ui.Server{Store: s, OnOpen: collector.AddUIOpen}
 	fmt.Printf("Veda review UI: http://%s  (ctrl-c to stop)\n", addr)
 	srv := &http.Server{Addr: addr, Handler: sv.Handler()}
 	go func() {
@@ -415,7 +428,7 @@ func cmdTelemetry(args []string) error {
 			return err
 		}
 		defer s.Close()
-		payload, err := telemetry.Preview(s, cfg.Telemetry.InstallID, version)
+		payload, err := telemetry.Preview(s, cfg.Telemetry.InstallID, version, nil)
 		if err != nil {
 			return err
 		}

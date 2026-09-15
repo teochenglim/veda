@@ -67,9 +67,17 @@ type ExportOut struct {
 
 // --- server ---------------------------------------------------------------
 
-// New builds the MCP server. embedder may be nil ⇒ keyword-only recall.
-func New(s *store.Store, embedder store.Embedder, agentID string) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "veda", Version: Version}, nil)
+// New builds the MCP server. embedder may be nil ⇒ keyword-only recall;
+// onClientInfo (nil-safe) receives each client's self-reported name at
+// initialize (v0.5 telemetry ext hook).
+func New(s *store.Store, embedder store.Embedder, agentID string, onClientInfo func(name string)) *mcp.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "veda", Version: Version}, &mcp.ServerOptions{
+		InitializedHandler: func(ctx context.Context, req *mcp.InitializedRequest) {
+			if onClientInfo != nil && req.ClientInfo() != nil {
+				onClientInfo(req.ClientInfo().Name)
+			}
+		},
+	})
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "remember",
@@ -154,8 +162,8 @@ func unixTime(ts int64) time.Time {
 }
 
 // Run serves MCP over stdio until the client disconnects. embedder may be nil.
-func Run(s *store.Store, embedder store.Embedder) error {
-	srv := New(s, embedder, agentFromEnv())
+func Run(s *store.Store, embedder store.Embedder, onClientInfo func(name string)) error {
+	srv := New(s, embedder, agentFromEnv(), onClientInfo)
 	return srv.Run(context.Background(), &mcp.StdioTransport{})
 }
 
