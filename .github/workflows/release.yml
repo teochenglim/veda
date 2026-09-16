@@ -65,6 +65,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
+          VERSION: ${{ github.ref_name }} # stamped via -X main.version below
         run: |
           EXT=""
           [ "$GOOS" = "windows" ] && EXT=".exe"
