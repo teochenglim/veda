@@ -133,7 +133,7 @@ jobs:
           VEDA_VERSION: ${{ github.ref_name }}
         run: |
           sh ./install.sh --dir "$HOME/.local/bin"
-          [ "$("$HOME/.local/bin/veda" version)" = "veda ${{ github.ref_name }}" ]
+          [ "$("$HOME/.local/bin/veda" version)" = "veda $VEDA_VERSION" ]
 
   # ── smoke: Homebrew tap (v0.8.0 AC1) — enabled once the tap repo exists ─────
   # Set the HOMEBREW_TAP repo variable (e.g. teochenglim/homebrew-veda) and run
@@ -146,7 +146,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Install from tap and verify
+        env:
+          HOMEBREW_TAP: ${{ vars.HOMEBREW_TAP }}
+          VEDA_VERSION: ${{ github.ref_name }}
         run: |
-          brew tap ${{ vars.HOMEBREW_TAP }}
-          brew install ${{ vars.HOMEBREW_TAP }}/veda
-          [ "$(veda version)" = "veda ${{ github.ref_name }}" ]
+          brew tap "$HOMEBREW_TAP"
+          brew install "$HOMEBREW_TAP/veda"
+          [ "$(veda version)" = "veda $VEDA_VERSION" ]

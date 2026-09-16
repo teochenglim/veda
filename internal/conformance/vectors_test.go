@@ -54,11 +54,11 @@ func TestGenerateVectors(t *testing.T) {
 
 	// export.v1.json — the canonical draft-01 export document
 	exportDoc := map[string]any{
-		"version":      "1",
-		"exported_at":  vectorCreatedAt,
-		"memories":     goldenMemories(),
-		"turns":        []map[string]any{{"id": 1, "session_id": "s1", "role": "user", "content": "vector turn one", "ts": vectorCreatedAt}},
-		"audit":        []map[string]any{{"id": 1, "memory_id": "mem_00000000000000000000000000000001", "action": "create", "actor": "vector", "reason": "golden vector", "ts": vectorCreatedAt}},
+		"version":     "1",
+		"exported_at": vectorCreatedAt,
+		"memories":    goldenMemories(),
+		"turns":       []map[string]any{{"id": 1, "session_id": "s1", "role": "user", "content": "vector turn one", "ts": vectorCreatedAt}},
+		"audit":       []map[string]any{{"id": 1, "memory_id": "mem_00000000000000000000000000000001", "action": "create", "actor": "vector", "reason": "golden vector", "ts": vectorCreatedAt}},
 	}
 	writeVector(t, vectorExportFile, marshalPretty(t, exportDoc))
 
