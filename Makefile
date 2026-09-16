@@ -57,6 +57,18 @@ smoke: build ## End-to-end smoke: init → MCP stdio round trip → export
 	  sleep 1; } | ./bin/veda serve --stdio >/dev/null 2>&1; \
 	./bin/veda export | grep -q "window seats" && echo "smoke OK"
 
+## --- distribution ------------------------------------------------------------
+
+.PHONY: install-sh-check
+install-sh-check: ## Syntax-check install.sh and render-packaging.sh
+	sh -n install.sh
+	sh -n scripts/render-packaging.sh
+
+.PHONY: packaging
+packaging: ## Render packaging/veda.rb + packaging/scoop/veda.json from the published release's SHA256SUMS (VERSION=x.y.z required)
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make packaging VERSION=x.y.z"; exit 1; fi
+	./scripts/render-packaging.sh $(VERSION)
+
 ## --- supply-chain hardening ----------------------------------------------
 
 .PHONY: github-action-bump

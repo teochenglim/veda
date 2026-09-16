@@ -1,0 +1,16 @@
+{
+  "_comment": "Scoop manifest for Veda. Rendered by `make packaging VERSION=x.y.z` from the published release's SHA256SUMS — do not edit by hand.",
+  "version": "@VERSION@",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/teochenglim/veda/releases/download/v@VERSION@/veda-v@VERSION@-windows-amd64.zip",
+      "hash": "@WINDOWS_AMD64_SHA@"
+    },
+    "arm64": {
+      "url": "https://github.com/teochenglim/veda/releases/download/v@VERSION@/veda-v@VERSION@-windows-arm64.zip",
+      "hash": "@WINDOWS_ARM64_SHA@"
+    }
+  },
+  "bin": ["veda.exe"],
+  "checkver": "github"
+}

@@ -1080,8 +1080,16 @@ func (s *Store) Export() ([]byte, error) {
 		return nil, err
 	}
 	doc := exportDoc{Version: "1", Exported: time.Now().Unix(), Memories: memories, Turns: turns, Audit: audit}
+	// draft-01 requires arrays, never null — v0.8.0 codified the export
+	// format, and this was the one place reality disagreed with the draft.
+	if doc.Memories == nil {
+		doc.Memories = []*Memory{}
+	}
 	if doc.Turns == nil {
 		doc.Turns = []Turn{}
+	}
+	if doc.Audit == nil {
+		doc.Audit = []*AuditEntry{}
 	}
 	return json.MarshalIndent(doc, "", "  ")
 }

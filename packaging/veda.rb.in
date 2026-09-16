@@ -1,0 +1,35 @@
+# Homebrew formula for Veda. Rendered by `make packaging VERSION=x.y.z`
+# from the published release's SHA256SUMS — do not edit by hand.
+class Veda < Formula
+  desc "One local memory file every MCP agent can read and write"
+  homepage "https://github.com/teochenglim/veda"
+  version "@VERSION@"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/teochenglim/veda/releases/download/v#{version}/veda-v#{version}-darwin-arm64.tar.gz"
+      sha256 "@DARWIN_ARM64_SHA@"
+    else
+      url "https://github.com/teochenglim/veda/releases/download/v#{version}/veda-v#{version}-darwin-amd64.tar.gz"
+      sha256 "@DARWIN_AMD64_SHA@"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.intel?
+      url "https://github.com/teochenglim/veda/releases/download/v#{version}/veda-v#{version}-linux-amd64.tar.gz"
+      sha256 "@LINUX_AMD64_SHA@"
+    else
+      url "https://github.com/teochenglim/veda/releases/download/v#{version}/veda-v#{version}-linux-arm64.tar.gz"
+      sha256 "@LINUX_ARM64_SHA@"
+    end
+  end
+
+  def install
+    bin.install "veda"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/veda version")
+  end
+end

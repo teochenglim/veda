@@ -105,6 +105,9 @@ jobs:
           merge-multiple: true
           path: dist/
 
+      - name: Generate SHA256SUMS
+        run: (cd dist && sha256sum -- * > SHA256SUMS)
+
       - name: Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
@@ -112,3 +115,38 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: dist/*
+
+  # ── smoke: install.sh on clean runners (v0.8.0 AC2) ─────────────────────────
+
+  smoke-install:
+    name: Smoke install.sh — ${{ matrix.os }}
+    needs: create-release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install and verify
+        env:
+          VEDA_VERSION: ${{ github.ref_name }}
+        run: |
+          sh ./install.sh --dir "$HOME/.local/bin"
+          [ "$("$HOME/.local/bin/veda" version)" = "veda ${{ github.ref_name }}" ]
+
+  # ── smoke: Homebrew tap (v0.8.0 AC1) — enabled once the tap repo exists ─────
+  # Set the HOMEBREW_TAP repo variable (e.g. teochenglim/homebrew-veda) and run
+  # `make packaging VERSION=x.y.z` to publish the formula for each release.
+
+  smoke-brew:
+    name: Smoke brew install
+    needs: create-release
+    if: vars.HOMEBREW_TAP != ''
+    runs-on: macos-latest
+    steps:
+      - name: Install from tap and verify
+        run: |
+          brew tap ${{ vars.HOMEBREW_TAP }}
+          brew install ${{ vars.HOMEBREW_TAP }}/veda
+          [ "$(veda version)" = "veda ${{ github.ref_name }}" ]

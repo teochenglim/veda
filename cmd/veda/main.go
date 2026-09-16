@@ -21,6 +21,7 @@ import (
 
 	"github.com/teochenglim/veda/internal/audit"
 	"github.com/teochenglim/veda/internal/config"
+	"github.com/teochenglim/veda/internal/conformance"
 	"github.com/teochenglim/veda/internal/embed"
 	"github.com/teochenglim/veda/internal/eval"
 	"github.com/teochenglim/veda/internal/llm"
@@ -67,6 +68,8 @@ func main() {
 		err = cmdAudit(rest)
 	case "policy":
 		err = cmdPolicy(rest)
+	case "conformance":
+		err = cmdConformance(rest)
 	case "version", "--version", "-v":
 		fmt.Println("veda " + version)
 	case "help", "--help", "-h":
@@ -97,6 +100,7 @@ Usage:
   veda eval -f suite.json            Score recall scenarios against a throwaway store
   veda audit keygen|export|verify    Signed audit-log export (compliance)
   veda policy status|enforce         Org retention + redaction policies
+  veda conformance storage [--dir DIR]   Validate a data dir against UOMP draft-01
   veda version                       Print the version
 
 Learn more: README.md
@@ -383,6 +387,37 @@ func cmdPolicy(args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown policy command %q", args[0])
+	}
+}
+
+// --- veda conformance ---------------------------------------------------------
+
+// cmdConformance certifies a data directory against the published UOMP
+// drafts. draft-01 ships `storage`; later drafts add `tools` and `sync`.
+func cmdConformance(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: veda conformance storage [--dir <veda-home>]")
+	}
+	switch args[0] {
+	case "storage":
+		fs := flag.NewFlagSet("storage", flag.ExitOnError)
+		dir := fs.String("dir", config.Home(), "Veda home directory to validate")
+		fs.Parse(args[1:])
+		rep := conformance.RunStorage(*dir)
+		for _, res := range rep.Results {
+			mark := "FAIL"
+			if res.OK {
+				mark = "ok"
+			}
+			fmt.Printf("  %-4s %-16s %s\n", mark, res.Name, res.Detail)
+		}
+		if !rep.OK {
+			return fmt.Errorf("%s does not satisfy UOMP draft-01 storage — failures above", rep.Dir)
+		}
+		fmt.Printf("conformance: %s satisfies UOMP draft-01 storage\n", rep.Dir)
+		return nil
+	default:
+		return fmt.Errorf("unknown conformance suite %q (draft-01 ships: storage)", args[0])
 	}
 }
 

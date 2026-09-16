@@ -33,7 +33,28 @@ Codex ──┘              │
 
 ## Install
 
-Requires Go 1.27+:
+macOS (Homebrew, once the tap is published):
+
+```sh
+brew tap teochenglim/veda
+brew install veda
+```
+
+macOS / Linux (curl installer — downloads the release archive, verifies its
+SHA-256, installs to the first writable of `/usr/local/bin` or `~/.local/bin`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/teochenglim/veda/main/install.sh | sh
+```
+
+Windows (Scoop):
+
+```sh
+scoop bucket add veda https://github.com/teochenglim/scoop-veda
+scoop install veda
+```
+
+Or straight from source, Go 1.27+:
 
 ```sh
 go install github.com/teochenglim/veda@latest
@@ -42,6 +63,19 @@ veda init
 
 `veda init` creates `~/.veda/` with `veda.db` (SQLite) and `config.toml`, and
 asks once whether you want anonymous usage stats (default: **no**).
+
+## Verify your install (UOMP draft-01)
+
+Veda's storage and export formats are codified as the UOMP draft-01 spec
+([spec/uomp-draft-01.md](spec/uomp-draft-01.md)). Check any data directory
+against it:
+
+```sh
+veda conformance storage                             # validates ~/.veda
+veda conformance storage --dir /path/to/veda-home    # any data directory
+```
+
+Every check names its reason on failure; conformance is read-only.
 
 ## Connect your agents
 
@@ -258,6 +292,7 @@ veda ui                  Open the review UI at http://127.0.0.1:7331
 veda worker              Run one capture/distill pipeline pass and exit
 veda export [-o file]    Export all memories as JSON
 veda import -f file      Import memories from a JSON export
+veda conformance storage [--dir DIR]   Validate a data dir against UOMP draft-01
 veda telemetry ...       Manage anonymous stats (default: off)
 veda version             Print the version
 ```

@@ -84,12 +84,36 @@ Details: [RELEASE/v0.6.0.md](RELEASE/v0.6.0.md) · design in [DESIGN/13](DESIGN/
 
 Details: [RELEASE/v0.7.0.md](RELEASE/v0.7.0.md) · design in [DESIGN/14](DESIGN/14_design_compliance.md)
 
-## v1.0 — UOMP protocol 📋
+## v0.8.0 — Distribution + UOMP draft-01 ✅
+
+- [x] Homebrew formula + Scoop manifest rendered from release checksums (`make packaging`), `install.sh` with SHA-256 verification; release CI attaches `SHA256SUMS` and smoke-tests the installer on clean macOS/Linux runners *(tap/bucket repo publication is a launch task — set the `HOMEBREW_TAP` repo variable to enable the brew smoke job)*
+- [x] UOMP draft-01 ([spec/uomp-draft-01.md](spec/uomp-draft-01.md)): on-disk schema + export format, codified from what already ships (one drift fixed: export arrays are never `null`)
+- [x] `veda conformance storage [--dir DIR]` — read-only draft-01 validation with named failures
+- [x] Spec versioning policy ([spec/VERSIONING.md](spec/VERSIONING.md))
+
+Details: [RELEASE/v0.8.0.md](RELEASE/v0.8.0.md)
+
+## v0.9.0 — UOMP draft-02: freeze the wire 📋
+
+- [ ] UOMP draft-02: MCP tool contract + sync wire format, normative
+- [ ] `veda conformance tools --command <cmd>` — certify any MCP server over stdio
+- [ ] `veda conformance sync --endpoint <url>` — certify any backend
+- [ ] Golden vectors (canonical export, signed audit, fixed-key envelopes) + deprecation policy
+
+Details: [RELEASE/v0.9.0.md](RELEASE/v0.9.0.md)
+
+## v1.0.0 — UOMP 1.0: freeze + second implementation 📋
 
 Veda is the product; **UOMP** (User-Owned Personal Memory Protocol) is the
-open spec — like Chrome vs HTTP. v1.0 freezes the protocol: the tool
-contract, the on-disk schema, the export format, and the sync wire format,
-with a second implementation as the compatibility proof.
+open spec — like Chrome vs HTTP. 1.0 is the stability statement:
+everything shipped in v0.1–v0.8 keeps working for the life of UOMP 1.x.
+
+- [ ] Spec 1.0.0 frozen with governance (RFCs, additive-only 1.x, export readable forever)
+- [ ] `uomp-kit`: a second implementation passing the conformance suites, in CI, both directions
+- [ ] Interop matrix: Veda ↔ spec, uomp-kit ↔ spec, Veda ↔ uomp-kit
+- [ ] Conformance suite published as a standalone artifact for self-certification
+
+Details: [RELEASE/v1.0.0.md](RELEASE/v1.0.0.md)
 
 ## Success metrics (90 days, from the PRD)
 
