@@ -64,18 +64,22 @@ veda init
 `veda init` creates `~/.veda/` with `veda.db` (SQLite) and `config.toml`, and
 asks once whether you want anonymous usage stats (default: **no**).
 
-## Verify your install (UOMP draft-01)
+## Verify your install (UOMP drafts)
 
-Veda's storage and export formats are codified as the UOMP draft-01 spec
-([spec/uomp-draft-01.md](spec/uomp-draft-01.md)). Check any data directory
-against it:
+Veda's storage, export, tool, and sync-wire formats are codified as the UOMP
+spec ([spec/uomp-draft-01.md](spec/uomp-draft-01.md),
+[spec/uomp-draft-02.md](spec/uomp-draft-02.md)). Certify any of them:
 
 ```sh
-veda conformance storage                             # validates ~/.veda
-veda conformance storage --dir /path/to/veda-home    # any data directory
+veda conformance storage                             # a data directory (draft-01)
+veda conformance storage --dir /path/to/veda-home
+veda conformance tools --command "veda serve --stdio"   # any MCP server (draft-02)
+veda conformance sync --endpoint https://sync.example.dev --token T   # any backend
 ```
 
-Every check names its reason on failure; conformance is read-only.
+Every check names its reason on failure; conformance is read-only. Golden
+vectors in [spec/vectors/](spec/vectors/) let other implementations test
+offline.
 
 ## Connect your agents
 

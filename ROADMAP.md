@@ -93,12 +93,12 @@ Details: [RELEASE/v0.7.0.md](RELEASE/v0.7.0.md) · design in [DESIGN/14](DESIGN/
 
 Details: [RELEASE/v0.8.0.md](RELEASE/v0.8.0.md)
 
-## v0.9.0 — UOMP draft-02: freeze the wire 📋
+## v0.9.0 — UOMP draft-02: freeze the wire ✅
 
-- [ ] UOMP draft-02: MCP tool contract + sync wire format, normative
-- [ ] `veda conformance tools --command <cmd>` — certify any MCP server over stdio
-- [ ] `veda conformance sync --endpoint <url>` — certify any backend
-- [ ] Golden vectors (canonical export, signed audit, fixed-key envelopes) + deprecation policy
+- [x] UOMP draft-02 ([spec/uomp-draft-02.md](spec/uomp-draft-02.md)): MCP tool contract + sync wire format, normative
+- [x] `veda conformance tools --command <cmd>` — certify any MCP server over stdio
+- [x] `veda conformance sync --endpoint <url>` — certify any backend (with `ReferenceBackend`, the executable reference)
+- [x] Golden vectors ([spec/vectors/](spec/vectors/)): canonical export, signed audit, fixed-key sync envelope + deprecation policy
 
 Details: [RELEASE/v0.9.0.md](RELEASE/v0.9.0.md)
 

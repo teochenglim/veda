@@ -1,0 +1,8 @@
+{
+  "type": "veda-audit-export",
+  "version": 1,
+  "exported_at": 1789440000,
+  "payload": {"type":"veda-audit-export","version":1,"exported_at":1789440000,"install_id":"vector-install-id","entries":[{"id":1,"memory_id":"mem_00000000000000000000000000000001","action":"create","actor":"vector","reason":"golden vector","ts":1789440000}]},
+  "public_key": "299be5abf4325baff70cd026314b57f7a10e719ef042d8cb88708d43f2db1031",
+  "signature": "84e15c23eef9983348b053ee30e7b75bbae6f5c36f0f19f3b1797f6f5eb49e55f38ad115b4d3ab73ae44b1c53925bc82c30e9f13fd07f0980c2b23361bb89a09"
+}

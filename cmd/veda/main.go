@@ -100,7 +100,8 @@ Usage:
   veda eval -f suite.json            Score recall scenarios against a throwaway store
   veda audit keygen|export|verify    Signed audit-log export (compliance)
   veda policy status|enforce         Org retention + redaction policies
-  veda conformance storage [--dir DIR]   Validate a data dir against UOMP draft-01
+  veda conformance storage|tools|sync   Certify against UOMP drafts: storage [--dir DIR],
+                                     tools --command CMD, sync --endpoint URL
   veda version                       Print the version
 
 Learn more: README.md
@@ -392,33 +393,57 @@ func cmdPolicy(args []string) error {
 
 // --- veda conformance ---------------------------------------------------------
 
-// cmdConformance certifies a data directory against the published UOMP
-// drafts. draft-01 ships `storage`; later drafts add `tools` and `sync`.
+// cmdConformance certifies a data directory, an MCP server, or a sync
+// backend against the published UOMP drafts.
 func cmdConformance(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: veda conformance storage [--dir <veda-home>]")
+		return fmt.Errorf("usage: veda conformance <storage|tools|sync> [flags]")
 	}
 	switch args[0] {
 	case "storage":
 		fs := flag.NewFlagSet("storage", flag.ExitOnError)
 		dir := fs.String("dir", config.Home(), "Veda home directory to validate")
 		fs.Parse(args[1:])
-		rep := conformance.RunStorage(*dir)
-		for _, res := range rep.Results {
-			mark := "FAIL"
-			if res.OK {
-				mark = "ok"
-			}
-			fmt.Printf("  %-4s %-16s %s\n", mark, res.Name, res.Detail)
+		return printConformance(conformance.RunStorage(*dir),
+			"satisfies UOMP draft-01 storage", "does not satisfy UOMP draft-01 storage")
+	case "tools":
+		fs := flag.NewFlagSet("tools", flag.ExitOnError)
+		command := fs.String("command", "", `MCP server command over stdio (required), e.g. --command "veda serve --stdio"`)
+		fs.Parse(args[1:])
+		if *command == "" {
+			return fmt.Errorf("usage: veda conformance tools --command <cmd>")
 		}
-		if !rep.OK {
-			return fmt.Errorf("%s does not satisfy UOMP draft-01 storage — failures above", rep.Dir)
+		return printConformance(conformance.RunTools(strings.Fields(*command), nil),
+			"satisfies the UOMP draft-02 tool contract", "does not satisfy the UOMP draft-02 tool contract")
+	case "sync":
+		fs := flag.NewFlagSet("sync", flag.ExitOnError)
+		endpoint := fs.String("endpoint", "", "sync backend base URL (required)")
+		token := fs.String("token", "", "Bearer plan token for the authorized checks")
+		unpaid := fs.String("unpaid-token", "", "optional: a token expected to be answered with the 402 paid gate")
+		fs.Parse(args[1:])
+		if *endpoint == "" {
+			return fmt.Errorf("usage: veda conformance sync --endpoint <url> [--token T] [--unpaid-token T]")
 		}
-		fmt.Printf("conformance: %s satisfies UOMP draft-01 storage\n", rep.Dir)
-		return nil
+		return printConformance(conformance.RunSync(*endpoint, conformance.SyncOptions{Token: *token, UnpaidToken: *unpaid}),
+			"satisfies the UOMP draft-02 sync wire", "does not satisfy the UOMP draft-02 sync wire")
 	default:
-		return fmt.Errorf("unknown conformance suite %q (draft-01 ships: storage)", args[0])
+		return fmt.Errorf("unknown conformance suite %q (draft-01 ships: storage; draft-02 adds: tools, sync)", args[0])
 	}
+}
+
+func printConformance(rep *conformance.Report, okMsg, failMsg string) error {
+	for _, res := range rep.Results {
+		mark := "FAIL"
+		if res.OK {
+			mark = "ok"
+		}
+		fmt.Printf("  %-4s %-24s %s\n", mark, res.Name, res.Detail)
+	}
+	if !rep.OK {
+		return fmt.Errorf("%s %s — failures above", rep.Dir, failMsg)
+	}
+	fmt.Printf("conformance: %s %s\n", rep.Dir, okMsg)
+	return nil
 }
 
 // --- veda sync ----------------------------------------------------------------

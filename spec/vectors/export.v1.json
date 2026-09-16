@@ -1,0 +1,45 @@
+{
+  "audit": [
+    {
+      "action": "create",
+      "actor": "vector",
+      "id": 1,
+      "memory_id": "mem_00000000000000000000000000000001",
+      "reason": "golden vector",
+      "ts": 1789440000
+    }
+  ],
+  "exported_at": 1789440000,
+  "memories": [
+    {
+      "id": "mem_00000000000000000000000000000001",
+      "type": "preference",
+      "content": "Vector: user prefers window seats",
+      "confidence": 0.9,
+      "salience": 0.8,
+      "created_at": 1789440000,
+      "updated_at": 1789440000
+    },
+    {
+      "id": "mem_00000000000000000000000000000002",
+      "type": "fact",
+      "content": "Vector: user lives in Singapore",
+      "source_turn_ids": "t1,t2",
+      "agent_id": "cursor",
+      "confidence": 1,
+      "salience": 0.5,
+      "created_at": 1789440001,
+      "updated_at": 1789440001
+    }
+  ],
+  "turns": [
+    {
+      "content": "vector turn one",
+      "id": 1,
+      "role": "user",
+      "session_id": "s1",
+      "ts": 1789440000
+    }
+  ],
+  "version": "1"
+}

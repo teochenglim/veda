@@ -1,0 +1,14 @@
+{
+  "device_id": "dev_vector",
+  "created_at": 1789440000,
+  "crypto": {
+    "algo": "xsalsa20poly1305",
+    "kdf": "scrypt",
+    "salt": "5f549156482c4b0ea456d64ca4a26932",
+    "N": 32768,
+    "r": 8,
+    "p": 1
+  },
+  "nonce": "000102030405060708090a0b0c0d0e0f1011121314151617",
+  "ciphertext": "lW8eY851nlOvR11s1BEELnO78sf3b2ilXNxWMU8eJ8UwFTxA+dxMGGabrdkPl8n3WDv5pbkVNy+jsUPxNjNWry/K/ThwVL3BQ491nJJL5EQ1f/Y/cGrDKIM4kFvyl6h+emP/k5GOhHXHBz+tEQrdZBbbAcNCn6jtRfQl/x08Owk0JyGh8VV41mUzJW45OujSDrvj4AhWhxozNE4PGWMxVq7fSGVVz58clA4lt9BRa8kSLnRd/xyLe4gEtDURPD9v/zN4zhed9pj6UBVcsGYCStMxztdCfIIObOGGlmGE5RfBWRb1vk6bm9lSGZ2vcdge+pRkgAhciaKjPfvdgVSFM6XutXpXm8Hy0Q=="
+}
