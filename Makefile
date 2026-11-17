@@ -34,6 +34,10 @@ test-verbose: ## Run the full test suite with verbose per-test output
 vet: ## Run go vet
 	go vet ./...
 
+.PHONY: vuln
+vuln: ## Scan for known vulnerabilities with govulncheck (same as CI)
+	GOTOOLCHAIN=local go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 .PHONY: fmt
 fmt: ## Format all Go source with gofmt
 	gofmt -l -w .
